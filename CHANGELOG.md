@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0](https://github.com/Maxl94/yaai/compare/v0.1.0...v0.1.0) (2026-02-16)
+
+
+### Miscellaneous Chores
+
+* rename package to align with PyPI ([fdad286](https://github.com/Maxl94/yaai/commit/fdad2865a091c13545e08867a7ceec3d72b68ee6))
+
 ## 0.1.0 (2026-02-16)
 
 
