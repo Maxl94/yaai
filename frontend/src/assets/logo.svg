@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 34 128 60">
+  <defs>
+    <linearGradient id="darkBg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0b2622"/>
+      <stop offset="100%" stop-color="#0e1528"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="64" cy="64" r="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="rgba(245,158,11,0.18)"/>
+      <stop offset="50%" stop-color="rgba(13,148,136,0.06)"/>
+      <stop offset="100%" stop-color="rgba(13,148,136,0)"/>
+    </radialGradient>
+    <clipPath id="eyeClip">
+      <path d="M2 64 Q31 37.5 64 37.5 Q97 37.5 126 64 Q97 90.5 64 90.5 Q31 90.5 2 64 Z"/>
+    </clipPath>
+  </defs>
+  <!-- Eye background -->
+  <path d="M0 64 Q30 36 64 36 Q98 36 128 64 Q98 92 64 92 Q30 92 0 64 Z" fill="url(#darkBg)"/>
+  <!-- Clipped content -->
+  <g clip-path="url(#eyeClip)">
+    <circle cx="64" cy="64" r="28" fill="url(#glow)"/>
+    <!-- Radar circles -->
+    <circle cx="64" cy="64" r="18" fill="none" stroke="rgba(13,148,136,0.1)" stroke-width="0.5"/>
+    <circle cx="64" cy="64" r="32" fill="none" stroke="rgba(13,148,136,0.06)" stroke-width="0.5"/>
+    <!-- Sweep line ~40deg -->
+    <line x1="64" y1="64" x2="90" y2="42" stroke="rgba(13,148,136,0.55)" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M64 64 L90 42 L94 47 Z" fill="rgba(13,148,136,0.08)"/>
+    <!-- HEX GRID r=8 h=6.9 -->
+    <!-- Row y=45.6 -->
+    <polygon points="44,45.6 40,52.5 32,52.5 28,45.6 32,38.7 40,38.7" fill="rgba(13,148,136,0.15)" stroke="rgba(13,148,136,0.38)" stroke-width="0.7"/>
+    <polygon points="58,45.6 54,52.5 46,52.5 42,45.6 46,38.7 54,38.7" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="72,45.6 68,52.5 60,52.5 56,45.6 60,38.7 68,38.7" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="86,45.6 82,52.5 74,52.5 70,45.6 74,38.7 82,38.7" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="100,45.6 96,52.5 88,52.5 84,45.6 88,38.7 96,38.7" fill="rgba(13,148,136,0.15)" stroke="rgba(13,148,136,0.38)" stroke-width="0.7"/>
+    <!-- Row y=54.8 -->
+    <polygon points="37,54.8 33,61.7 25,61.7 21,54.8 25,47.9 33,47.9" fill="rgba(13,148,136,0.08)" stroke="rgba(13,148,136,0.22)" stroke-width="0.6"/>
+    <polygon points="51,54.8 47,61.7 39,61.7 35,54.8 39,47.9 47,47.9" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="65,54.8 61,61.7 53,61.7 49,54.8 53,47.9 61,47.9" fill="rgba(245,158,11,0.3)" stroke="rgba(245,158,11,0.65)" stroke-width="1"/>
+    <polygon points="79,54.8 75,61.7 67,61.7 63,54.8 67,47.9 75,47.9" fill="rgba(245,158,11,0.3)" stroke="rgba(245,158,11,0.65)" stroke-width="1"/>
+    <polygon points="93,54.8 89,61.7 81,61.7 77,54.8 81,47.9 89,47.9" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="107,54.8 103,61.7 95,61.7 91,54.8 95,47.9 103,47.9" fill="rgba(13,148,136,0.08)" stroke="rgba(13,148,136,0.22)" stroke-width="0.6"/>
+    <!-- Row y=64 -->
+    <polygon points="30,64 26,70.9 18,70.9 14,64 18,57.1 26,57.1" fill="rgba(13,148,136,0.08)" stroke="rgba(13,148,136,0.22)" stroke-width="0.6"/>
+    <polygon points="44,64 40,70.9 32,70.9 28,64 32,57.1 40,57.1" fill="rgba(13,148,136,0.15)" stroke="rgba(13,148,136,0.38)" stroke-width="0.7"/>
+    <polygon points="58,64 54,70.9 46,70.9 42,64 46,57.1 54,57.1" fill="rgba(245,158,11,0.15)" stroke="rgba(245,158,11,0.35)" stroke-width="0.8"/>
+    <polygon points="72,64 68,70.9 60,70.9 56,64 60,57.1 68,57.1" fill="rgba(245,158,11,0.6)" stroke="#f59e0b" stroke-width="1.2"/>
+    <polygon points="86,64 82,70.9 74,70.9 70,64 74,57.1 82,57.1" fill="rgba(245,158,11,0.15)" stroke="rgba(245,158,11,0.35)" stroke-width="0.8"/>
+    <polygon points="100,64 96,70.9 88,70.9 84,64 88,57.1 96,57.1" fill="rgba(13,148,136,0.15)" stroke="rgba(13,148,136,0.38)" stroke-width="0.7"/>
+    <polygon points="114,64 110,70.9 102,70.9 98,64 102,57.1 110,57.1" fill="rgba(13,148,136,0.08)" stroke="rgba(13,148,136,0.22)" stroke-width="0.6"/>
+    <!-- Row y=73.2 -->
+    <polygon points="37,73.2 33,80.1 25,80.1 21,73.2 25,66.3 33,66.3" fill="rgba(13,148,136,0.08)" stroke="rgba(13,148,136,0.22)" stroke-width="0.6"/>
+    <polygon points="51,73.2 47,80.1 39,80.1 35,73.2 39,66.3 47,66.3" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="65,73.2 61,80.1 53,80.1 49,73.2 53,66.3 61,66.3" fill="rgba(245,158,11,0.3)" stroke="rgba(245,158,11,0.65)" stroke-width="1"/>
+    <polygon points="79,73.2 75,80.1 67,80.1 63,73.2 67,66.3 75,66.3" fill="rgba(245,158,11,0.3)" stroke="rgba(245,158,11,0.65)" stroke-width="1"/>
+    <polygon points="93,73.2 89,80.1 81,80.1 77,73.2 81,66.3 89,66.3" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="107,73.2 103,80.1 95,80.1 91,73.2 95,66.3 103,66.3" fill="rgba(13,148,136,0.08)" stroke="rgba(13,148,136,0.22)" stroke-width="0.6"/>
+    <!-- Row y=82.4 -->
+    <polygon points="44,82.4 40,89.3 32,89.3 28,82.4 32,75.5 40,75.5" fill="rgba(13,148,136,0.15)" stroke="rgba(13,148,136,0.38)" stroke-width="0.7"/>
+    <polygon points="58,82.4 54,89.3 46,89.3 42,82.4 46,75.5 54,75.5" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="72,82.4 68,89.3 60,89.3 56,82.4 60,75.5 68,75.5" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="86,82.4 82,89.3 74,89.3 70,82.4 74,75.5 82,75.5" fill="rgba(13,148,136,0.25)" stroke="rgba(13,148,136,0.5)" stroke-width="0.8"/>
+    <polygon points="100,82.4 96,89.3 88,89.3 84,82.4 88,75.5 96,75.5" fill="rgba(13,148,136,0.15)" stroke="rgba(13,148,136,0.38)" stroke-width="0.7"/>
+    <!-- Radar dots (5) -->
+    <circle cx="50" cy="45.6" r="3.5" fill="rgba(13,148,136,0.08)"/>
+    <circle cx="50" cy="45.6" r="1.8" fill="#14b8a6" opacity="0.5"/>
+    <circle cx="85" cy="54.8" r="4" fill="rgba(245,158,11,0.08)"/>
+    <circle cx="85" cy="54.8" r="2" fill="#f59e0b" opacity="0.5"/>
+    <circle cx="92" cy="64" r="3.5" fill="rgba(13,148,136,0.08)"/>
+    <circle cx="92" cy="64" r="1.8" fill="#14b8a6" opacity="0.5"/>
+    <circle cx="43" cy="73.2" r="4" fill="rgba(245,158,11,0.08)"/>
+    <circle cx="43" cy="73.2" r="2" fill="#f59e0b" opacity="0.5"/>
+    <circle cx="78" cy="82.4" r="3.5" fill="rgba(13,148,136,0.08)"/>
+    <circle cx="78" cy="82.4" r="1.8" fill="#14b8a6" opacity="0.5"/>
+    <!-- Amber pupil -->
+    <circle cx="64" cy="64" r="5" fill="#f59e0b"/>
+    <circle cx="64" cy="64" r="3" fill="#fbbf24"/>
+    <circle cx="62.5" cy="62.5" r="1.2" fill="rgba(255,255,255,0.5)"/>
+  </g>
+  <!-- Eye border drawn on top so hexes don't overlap it -->
+  <path d="M0 64 Q30 36 64 36 Q98 36 128 64 Q98 92 64 92 Q30 92 0 64 Z" fill="none" stroke="rgba(13,148,136,0.2)" stroke-width="1.5"/>
+</svg>

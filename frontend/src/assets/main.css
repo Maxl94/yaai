@@ -1,0 +1,210 @@
+/* Modern AI Monitoring Dashboard Styles */
+@import './base.css';
+
+/* Reset and base styles */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+/* Modern scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(13, 148, 136, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(13, 148, 136, 0.5);
+}
+
+/* Global link styles */
+a {
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s ease;
+}
+
+/* Utility classes */
+.gradient-text {
+  background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.glass-effect {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.hover-lift {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+/* Card improvements */
+.v-card {
+  transition: all 0.3s ease;
+}
+
+/* Button improvements */
+.v-btn {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 500 !important;
+}
+
+/* Chip improvements */
+.v-chip {
+  font-weight: 500 !important;
+}
+
+/* Table improvements */
+.v-data-table {
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+
+.v-data-table thead th {
+  font-weight: 600 !important;
+  text-transform: uppercase;
+  font-size: 0.75rem !important;
+  letter-spacing: 0.5px;
+}
+
+/* Dialog improvements */
+.v-dialog .v-card {
+  border-radius: 16px !important;
+}
+
+/* Page header styles */
+.page-header {
+  background: linear-gradient(135deg, #0f766e 0%, #0d9488 50%, #14b8a6 100%);
+  border-radius: 16px;
+  padding: 32px;
+  margin-bottom: 24px;
+  color: white;
+}
+
+.page-header h1 {
+  font-weight: 700;
+  margin: 0 0 8px 0;
+}
+
+.page-header p {
+  opacity: 0.9;
+  margin: 0;
+}
+
+/* Stats card styles */
+.stat-card {
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.1) 0%, rgba(20, 184, 166, 0.1) 100%);
+  border-radius: 16px;
+  padding: 24px;
+  text-align: center;
+  border: 1px solid rgba(13, 148, 136, 0.2);
+}
+
+.stat-card .stat-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #0d9488;
+}
+
+.stat-card .stat-label {
+  font-size: 0.875rem;
+  color: rgba(0, 0, 0, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Dark mode adjustments */
+.v-theme--dark .stat-card {
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.2) 0%, rgba(20, 184, 166, 0.2) 100%);
+  border-color: rgba(13, 148, 136, 0.3);
+}
+
+.v-theme--dark .stat-card .stat-label {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.v-theme--dark ::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.v-theme--dark ::-webkit-scrollbar-thumb {
+  background: rgba(13, 148, 136, 0.4);
+}
+
+.v-theme--dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(13, 148, 136, 0.6);
+}
+
+/* Animation utilities */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.5s ease forwards;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.pulse {
+  animation: pulse 2s infinite;
+}
+
+/* Status colors */
+.status-healthy {
+  color: #10b981;
+}
+
+.status-warning {
+  color: #FB8C00;
+}
+
+.status-critical {
+  color: #E53935;
+}
+
+.status-unknown {
+  color: #78909C;
+}

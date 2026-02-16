@@ -1,0 +1,88 @@
+site_name: YAAI Monitoring
+site_description: "Yet Another AI Monitoring — schema-driven ML model monitoring platform"
+site_url: https://Maxl94.github.io/yaai/
+repo_url: https://github.com/Maxl94/yaai
+repo_name: Maxl94/yaai
+edit_uri: edit/main/docs/
+
+exclude_docs: |
+  README.md
+
+validation:
+  nav:
+    not_found: warn
+    absolute_links: info
+    omitted_files: info
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+  icon:
+    repo: fontawesome/brands/github
+  logo: assets/logo-bordered.svg
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Core Concepts: concepts.md
+  - Drift Detection Guide: drift-guide.md
+  - Architecture: architecture.md
+  - Reference:
+      - REST API: reference/api.md
+      - Python SDK: reference/sdk.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            members_order: source
+            merge_init_into_class: true
+  - render_swagger:
+      allow_arbitrary_locations: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Maxl94/yaai
+
+extra_css:
+  - stylesheets/extra.css

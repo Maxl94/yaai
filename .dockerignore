@@ -1,0 +1,47 @@
+# Version control
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Tests and scripts
+tests/
+scripts/
+
+# Docs
+docs/
+mkdocs.yml
+
+# Environment and config
+.env
+.env.*
+auth.yaml
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# CI/CD
+.github/
+
+# Editor/IDE
+.claude/
+.vscode/
+.idea/
+
+# Frontend build artifacts (rebuilt in Docker)
+frontend/node_modules/
+frontend/dist/
+
+# Misc
+LICENSE
+CONTRIBUTING.md
+TODOs.md

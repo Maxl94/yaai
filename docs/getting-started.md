@@ -2,20 +2,58 @@
 
 This walks you through the full flow: start the server, register a model, send data, and watch dashboards appear.
 
+## Installation
+
+YAAI ships as two things: a lightweight **Python SDK** and a self-hosted **monitoring server**.
+
+### SDK only
+
+For sending inference data from your services:
+
+```bash
+# pip
+pip install yaai
+
+# uv
+uv add yaai
+```
+
+This installs just `httpx` and `pydantic`. No heavy dependencies. If you authenticate with Google service accounts instead of API keys, install with `pip install yaai[gcp]` to add `google-auth`.
+
+### Server (includes SDK)
+
+For running the full monitoring platform:
+
+```bash
+# pip
+pip install yaai[server]
+
+# uv
+uv add yaai[server]
+```
+
+This pulls in FastAPI, SQLAlchemy, scikit-learn, and friends. You'll also need PostgreSQL.
+
+!!! note
+    YAAI is not on PyPI yet. For now, install from source — see the [README](https://github.com/Maxl94/yaai#development).
+
 ## Start the server
 
 The fastest path is Docker Compose:
 
 ```bash
-git clone https://github.com/mballuff/ai-monitoring.git
-cd ai-monitoring
+git clone https://github.com/Maxl94/yaai.git
+cd yaai
+cp .env.example .env
 docker compose up -d
 ```
 
 This starts PostgreSQL and the YAAI server. Open [http://localhost:8000](http://localhost:8000) -- you should see the login screen.
 
+The `.env.example` ships with Google OAuth **disabled** and API key auth **enabled** -- that's all you need to get started. See `.env.example` for the full list of configuration options.
+
 !!! tip "Default credentials"
-    On first run, YAAI creates an admin account. Check your `auth.yaml` or `.env` for the configured admin password. With Google OAuth enabled, just sign in with an allowed email.
+    On first run, YAAI creates an admin account. Check your `.env` for the configured admin password (`AUTH_DEFAULT_ADMIN_PASSWORD`). With Google OAuth enabled, just sign in with an allowed email.
 
 ## Option A: Use the Python SDK
 
@@ -112,7 +150,7 @@ VERSION=$(curl -s -X POST "$BASE/models/$MODEL_ID/versions" \
   -H "X-API-Key: $API_KEY" \
   -d '{
     "version": "v1.0",
-    "schema_fields": [
+    "schema": [
       {"field_name": "age", "direction": "input", "data_type": "numerical"},
       {"field_name": "income", "direction": "input", "data_type": "numerical"},
       {"field_name": "region", "direction": "input", "data_type": "categorical"},

@@ -57,7 +57,7 @@ async def main():
             outputs={"is_fraud": "false"},
         )
 
-        # Log a batch (up to 1000 records)
+        # Log a batch (up to 10,000 records)
         await client.add_inferences(
             model_version_id=version.id,
             records=[
@@ -92,8 +92,17 @@ asyncio.run(main())
 | `add_inferences(model_version_id, records)` | Log a batch of inferences |
 | `add_reference_data(model_id, model_version_id, records)` | Upload baseline data |
 | `add_ground_truth(inference_id, label)` | Attach ground truth to an inference |
-| `list_jobs(model_id, model_version_id)` | List drift detection jobs |
+| `get_version_job(model_id, model_version_id)` | Get the drift job for a version |
+| `get_job(job_id)` | Fetch job details |
+| `update_job(job_id, **fields)` | Update job configuration |
+| `trigger_job(job_id)` | Trigger a drift detection run |
 | `backfill_job(job_id)` | Trigger historical drift backfill |
+| `infer_schema(sample)` | Infer schema from a single sample |
+| `infer_schema_batch(samples)` | Infer schema from multiple samples |
+| `validate_schema(schema_fields, inputs, outputs)` | Validate a record against an inline schema |
+| `validate_schema_batch(schema_fields, records)` | Validate a batch against an inline schema |
+| `validate_model_version_schema(model_id, version_id, inputs, outputs)` | Validate a record against a version's schema |
+| `validate_model_version_schema_batch(model_id, version_id, records)` | Validate a batch against a version's schema |
 
 ## Full API reference
 
