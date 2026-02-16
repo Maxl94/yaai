@@ -1,6 +1,6 @@
 [project]
 name = "yaai-monitoring"
-version = "0.1.0"
+version = "0.1.1"
 description = "Yet Another AI monitoring — SDK and self-hosted ML model monitoring platform"
 readme = "README.md"
 license = "LicenseRef-Elastic-2.0"
