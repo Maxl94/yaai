@@ -12,13 +12,13 @@ For sending inference data from your services:
 
 ```bash
 # pip
-pip install yaai
+pip install yaai-monitoring
 
 # uv
-uv add yaai
+uv add yaai-monitoring
 ```
 
-This installs just `httpx` and `pydantic`. No heavy dependencies. If you authenticate with Google service accounts instead of API keys, install with `pip install yaai[gcp]` to add `google-auth`.
+This installs just `httpx` and `pydantic`. No heavy dependencies. If you authenticate with Google service accounts instead of API keys, install with `pip install yaai-monitoring[gcp]` to add `google-auth`.
 
 ### Server (includes SDK)
 
@@ -26,16 +26,13 @@ For running the full monitoring platform:
 
 ```bash
 # pip
-pip install yaai[server]
+pip install yaai-monitoring[server]
 
 # uv
-uv add yaai[server]
+uv add yaai-monitoring[server]
 ```
 
 This pulls in FastAPI, SQLAlchemy, scikit-learn, and friends. You'll also need PostgreSQL.
-
-!!! note
-    YAAI is not on PyPI yet. For now, install from source — see the [README](https://github.com/Maxl94/yaai#development).
 
 ## Start the server
 
@@ -60,7 +57,7 @@ The `.env.example` ships with Google OAuth **disabled** and API key auth **enabl
 Install the SDK (just `httpx` + `pydantic`, nothing heavy):
 
 ```bash
-pip install yaai
+pip install yaai-monitoring
 ```
 
 Then run this script. It registers a model, defines a schema, uploads reference data, and sends inference data -- everything you need for dashboards and drift detection to kick in.
