@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+auth.yaml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing & coverage
+.coverage
+htmlcov/
+.pytest_cache/
+reports/
+
+# Ruff
+.ruff_cache/
+
+# MkDocs
+site/
+docs/openapi.json
+
+# Node
+node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/test-results/
+frontend/e2e/.seed-data.json
+frontend/*.local
+frontend/*.tsbuildinfo
+
+# Docker
+pgdata/
+
+# UV
+.python-version
+
+# Built frontend assets (shipped with server in Docker)
+yaai/server/static
+
+# Todo
+TODOs.md

@@ -49,7 +49,7 @@ Inference data is what your model sees in production. Every time your model make
 }
 ```
 
-YAAI validates it against the schema, stores it as JSONB, and it immediately shows up in dashboards. Send data one at a time or in batches of up to 1000.
+YAAI validates it against the schema, stores it as JSONB, and it immediately shows up in dashboards. Send data one at a time or in batches of up to 10,000.
 
 Extra fields not in the schema are silently ignored -- this means your service can send more data than the schema defines without breaking anything.
 
@@ -114,10 +114,13 @@ The time range is adjustable. Tabs filter by input vs. output fields.
 
 ## Authentication
 
-YAAI supports three auth methods:
+YAAI supports four auth methods:
 
-- **Google OAuth** -- for human users via browser
-- **API keys** -- for service accounts and SDK clients (`X-API-Key: yaam_...`)
-- **Google service accounts** -- for GCP workloads using Application Default Credentials
+- **Local accounts** -- username + password, enabled by default. An admin account is created on first startup. Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
+- **Google OAuth** -- for human users via browser. Disabled by default. When enabled, local auth is automatically disabled.
+- **API keys** -- for service accounts and SDK clients (`X-API-Key: yaam_...`). Enabled by default. Keys are scoped per-model.
+- **Google service accounts** -- for GCP workloads using Application Default Credentials and ID token verification.
 
-Configure auth in `auth.yaml`. See the [architecture docs](architecture.md) for details on the auth system.
+Two roles exist: **owner** (full admin access) and **viewer** (read-only).
+
+Configure auth via environment variables (all prefixed with `AUTH_`). See `.env.example` for the full list.

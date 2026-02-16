@@ -1,7 +1,7 @@
 # YAAI Monitoring
 
 <p align="center">
-  <img src="logo.svg" alt="YAAI Monitoring" width="320">
+  <img src="assets/banner-bordered.svg" alt="YAAI Monitoring" width="320">
 </p>
 
 **Yet Another AI Monitoring** -- because the existing ones didn't fit and building your own seemed like a good idea at the time.

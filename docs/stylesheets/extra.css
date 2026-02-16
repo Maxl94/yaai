@@ -1,0 +1,93 @@
+/* Swagger UI color overrides for mkdocs-material teal theme */
+
+.swagger-ui .topbar {
+  display: none;
+}
+
+.swagger-ui .opblock.opblock-get .opblock-summary-method {
+  background: #0d9488;
+}
+
+.swagger-ui .opblock.opblock-get .opblock-summary {
+  border-color: #0d9488;
+}
+
+.swagger-ui .opblock.opblock-get {
+  background: rgba(13, 148, 136, 0.05);
+  border-color: #0d9488;
+}
+
+.swagger-ui .opblock.opblock-post .opblock-summary-method {
+  background: #2563eb;
+}
+
+.swagger-ui .opblock.opblock-post .opblock-summary {
+  border-color: #2563eb;
+}
+
+.swagger-ui .opblock.opblock-post {
+  background: rgba(37, 99, 235, 0.05);
+  border-color: #2563eb;
+}
+
+.swagger-ui .opblock.opblock-put .opblock-summary-method {
+  background: #d97706;
+}
+
+.swagger-ui .opblock.opblock-put .opblock-summary {
+  border-color: #d97706;
+}
+
+.swagger-ui .opblock.opblock-put {
+  background: rgba(217, 119, 6, 0.05);
+  border-color: #d97706;
+}
+
+.swagger-ui .opblock.opblock-delete .opblock-summary-method {
+  background: #dc2626;
+}
+
+.swagger-ui .opblock.opblock-delete .opblock-summary {
+  border-color: #dc2626;
+}
+
+.swagger-ui .opblock.opblock-delete {
+  background: rgba(220, 38, 38, 0.05);
+  border-color: #dc2626;
+}
+
+.swagger-ui .opblock.opblock-patch .opblock-summary-method {
+  background: #7c3aed;
+}
+
+.swagger-ui .opblock.opblock-patch .opblock-summary {
+  border-color: #7c3aed;
+}
+
+.swagger-ui .opblock.opblock-patch {
+  background: rgba(124, 58, 237, 0.05);
+  border-color: #7c3aed;
+}
+
+.swagger-ui .btn.execute {
+  background-color: #0d9488;
+  border-color: #0d9488;
+}
+
+.swagger-ui .btn.execute:hover {
+  background-color: #0f766e;
+  border-color: #0f766e;
+}
+
+/* Dark mode */
+[data-md-color-scheme="slate"] .swagger-ui {
+  filter: invert(88%) hue-rotate(180deg);
+}
+
+[data-md-color-scheme="slate"] .swagger-ui .opblock-summary-method {
+  filter: invert(100%) hue-rotate(180deg);
+}
+
+[data-md-color-scheme="slate"] .swagger-ui svg {
+  filter: invert(100%) hue-rotate(180deg);
+}

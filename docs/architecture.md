@@ -65,4 +65,4 @@ In production (Docker), everything runs as a single process: FastAPI serves the 
 docker compose up -d   # starts PostgreSQL + YAAI server
 ```
 
-For development, the backend and frontend run separately -- see [Getting Started](getting-started.md).
+For development, the backend and frontend run separately -- see the [README](https://github.com/Maxl94/yaai#development) or [CONTRIBUTING.md](https://github.com/Maxl94/yaai/blob/main/CONTRIBUTING.md).
