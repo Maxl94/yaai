@@ -3307,7 +3307,7 @@ wheels = [
 ]
 
 [[package]]
-name = "yaai"
+name = "yaai-monitoring"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -3359,7 +3359,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "testcontainers" },
-    { name = "yaai", extra = ["server"] },
+    { name = "yaai-monitoring", extra = ["server"] },
 ]
 
 [package.metadata]
@@ -3407,5 +3407,5 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "ruff", specifier = ">=0.15.0" },
     { name = "testcontainers", extras = ["postgres"], specifier = ">=4.0.0" },
-    { name = "yaai", extras = ["server"] },
+    { name = "yaai-monitoring", extras = ["server"] },
 ]
