@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/Maxl94/yaai/compare/v0.1.0...v0.1.1) (2026-02-16)
+
+
+### Documentation
+
+* corrects package name ([319ca9d](https://github.com/Maxl94/yaai/commit/319ca9d673476a1d6e7845dd86e63bf2983d69ba))
+* update install commands and fix build for yaai-monitoring rename ([88a9921](https://github.com/Maxl94/yaai/commit/88a992117a0a975778ca6faca428390feed9ce21))
+
 ## [0.1.0](https://github.com/Maxl94/yaai/compare/v0.1.0...v0.1.0) (2026-02-16)
 
 
