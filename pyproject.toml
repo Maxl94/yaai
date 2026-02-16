@@ -1,5 +1,5 @@
 [project]
-name = "yaai"
+name = "yaai-monitoring"
 version = "0.1.0"
 description = "Yet Another AI monitoring — SDK and self-hosted ML model monitoring platform"
 readme = "README.md"
