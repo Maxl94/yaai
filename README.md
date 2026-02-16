@@ -46,13 +46,13 @@ For sending inference data from your services:
 
 ```bash
 # pip
-pip install yaai
+pip install yaai-monitoring
 
 # uv
-uv add yaai
+uv add yaai-monitoring
 ```
 
-This installs just `httpx` and `pydantic`. No heavy dependencies. If you authenticate with Google service accounts instead of API keys, install with `pip install yaai[gcp]` to add `google-auth`.
+This installs just `httpx` and `pydantic`. No heavy dependencies. If you authenticate with Google service accounts instead of API keys, install with `pip install yaai-monitoring[gcp]` to add `google-auth`.
 
 ### Server (includes SDK)
 
@@ -60,15 +60,14 @@ For running the full monitoring platform:
 
 ```bash
 # pip
-pip install yaai[server]
+pip install yaai-monitoring[server]
 
 # uv
-uv add yaai[server]
+uv add yaai-monitoring[server]
 ```
 
 This pulls in FastAPI, SQLAlchemy, scikit-learn, and friends. You'll also need PostgreSQL.
 
-> **Note:** YAAI is not on PyPI yet. For now, install from source — see [Development](#development).
 
 ## Quick Start with Docker
 
@@ -284,8 +283,8 @@ Full interactive API docs at `http://localhost:8000/docs` (Swagger UI).
 │          JSONB inference storage          │
 └──────────────────────────────────────────┘
 
-pip install yaai          → just the SDK (httpx + pydantic)
-pip install yaai[server]  → everything above
+pip install yaai-monitoring          → just the SDK (httpx + pydantic)
+pip install yaai-monitoring[server]  → everything above
 ```
 
 ## Development

@@ -5,8 +5,8 @@ The SDK is a thin async client. It covers what a service account needs to do: re
 ## Install
 
 ```bash
-pip install yaai          # just the client (httpx + pydantic)
-pip install yaai[gcp]     # adds google-auth for GCP service accounts
+pip install yaai-monitoring          # just the client (httpx + pydantic)
+pip install yaai-monitoring[gcp]     # adds google-auth for GCP service accounts
 ```
 
 ## Authentication
