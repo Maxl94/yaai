@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/Maxl94/yaai/compare/v0.1.6...v0.1.7) (2026-02-19)
+
+
+### Bug Fixes
+
+* removes rm command in release actions ([0a3d0d9](https://github.com/Maxl94/yaai/commit/0a3d0d962a5815767706705eb52c467fd9d91433))
+
 ## [0.1.6](https://github.com/Maxl94/yaai/compare/v0.1.5...v0.1.6) (2026-02-19)
 
 
