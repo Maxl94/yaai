@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/Maxl94/yaai/compare/v0.1.4...v0.1.5) (2026-02-19)
+
+
+### Bug Fixes
+
+* adds static files as build artifact ([426c76a](https://github.com/Maxl94/yaai/commit/426c76ab90ad222c6ec492f5c89090cf589b4705))
+
 ## [0.1.4](https://github.com/Maxl94/yaai/compare/v0.1.3...v0.1.4) (2026-02-19)
 
 
