@@ -3,6 +3,7 @@
 # Run on the project root with:
 # cd frontend && npm ci && npm run build-only && cd ..
 # cp -r frontend/dist yaai/server/static
+# rm -rf dist
 # uv build --wheel
 #
 # Then build and run the image:
