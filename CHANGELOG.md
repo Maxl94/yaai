@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/Maxl94/yaai/compare/v0.1.2...v0.1.3) (2026-02-19)
+
+
+### Bug Fixes
+
+* adds missing alembic files to package ([7a84792](https://github.com/Maxl94/yaai/commit/7a84792519622ac3f237adee82c1357bdd288c58))
+
 ## [0.1.2](https://github.com/Maxl94/yaai/compare/v0.1.1...v0.1.2) (2026-02-19)
 
 
