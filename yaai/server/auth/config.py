@@ -65,9 +65,7 @@ class OAuthConfig(BaseModel):
 
 
 class GoogleSAConfig(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="AUTH_SERVICE_ACCOUNTS_GOOGLE_", env_file=".env", extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_prefix="AUTH_SERVICE_ACCOUNTS_GOOGLE_", env_file=".env", extra="ignore")
 
     enabled: bool = False
     allowed_emails: list[str] = []
@@ -80,9 +78,7 @@ class GoogleSAConfig(BaseSettings):
 
 
 class APIKeyServiceConfig(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="AUTH_SERVICE_ACCOUNTS_API_KEYS_", env_file=".env", extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_prefix="AUTH_SERVICE_ACCOUNTS_API_KEYS_", env_file=".env", extra="ignore")
 
     enabled: bool = True
 
