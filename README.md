@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="docs/assets/banner-bordered.svg" alt="YAAI Monitoring" width="480">
+  <img src="https://raw.githubusercontent.com/Maxl94/yaai/main/docs/assets/banner-bordered.svg" alt="YAAI Monitoring" width="480">
 </p>
 
 <p align="center">
   <strong>Yet Another AI Monitoring</strong> — because the existing ones didn't fit and building your own seemed like a good idea at the time.
 </p>
 
-![Models Overview](docs/screenshots/models.jpeg)
+![Models Overview](https://raw.githubusercontent.com/Maxl94/yaai/main/docs/screenshots/models.jpeg)
 
 ## Why This Exists
 
@@ -36,6 +36,49 @@ This might not be for you if you need:
 
 Those tools are more powerful. YAAI is more opinionated and simpler.
 
+## Quick Start
+
+### Option A: Docker Compose (recommended)
+
+The easiest way — PostgreSQL is included, no extra setup needed.
+
+```bash
+git clone https://github.com/Maxl94/yaai.git
+cd yaai
+cp .env.example .env
+docker compose up -d
+```
+
+Open **http://localhost:8000** — the server and frontend are ready.
+
+The default `.env` ships with API key auth enabled and a default admin account. See `.env.example` for all available settings.
+
+### Option B: Install from PyPI
+
+If you want to run the server directly (you'll need your own PostgreSQL instance):
+
+```bash
+pip install yaai-monitoring[server]
+```
+
+Set the minimum required environment variables:
+
+```bash
+export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/yaai"
+export DATABASE_URL_SYNC="postgresql://user:pass@localhost:5432/yaai"
+export AUTH_JWT_SECRET="$(openssl rand -base64 32)"
+export SESSION_SECRET="$(openssl rand -base64 32)"
+export AUTH_DEFAULT_ADMIN_PASSWORD="changeme"
+
+uvicorn yaai.server.main:app --host 0.0.0.0 --port 8000
+```
+
+Database migrations are applied automatically on startup via [Alembic](https://alembic.sqlalchemy.org/). Set `AUTO_MIGRATE=false` to disable this and run migrations yourself.
+
+Open **http://localhost:8000** — the frontend is bundled with the server.
+
+Full API docs at **http://localhost:8000/docs**.
+
 ## Installation
 
 YAAI ships as two things: a lightweight **Python SDK** and a self-hosted **monitoring server**.
@@ -45,11 +88,7 @@ YAAI ships as two things: a lightweight **Python SDK** and a self-hosted **monit
 For sending inference data from your services:
 
 ```bash
-# pip
 pip install yaai-monitoring
-
-# uv
-uv add yaai-monitoring
 ```
 
 This installs just `httpx` and `pydantic`. No heavy dependencies. If you authenticate with Google service accounts instead of API keys, install with `pip install yaai-monitoring[gcp]` to add `google-auth`.
@@ -59,28 +98,10 @@ This installs just `httpx` and `pydantic`. No heavy dependencies. If you authent
 For running the full monitoring platform:
 
 ```bash
-# pip
 pip install yaai-monitoring[server]
-
-# uv
-uv add yaai-monitoring[server]
 ```
 
 This pulls in FastAPI, SQLAlchemy, scikit-learn, and friends. You'll also need PostgreSQL.
-
-
-## Quick Start with Docker
-
-The fastest way to get the full platform running:
-
-```bash
-git clone https://github.com/Maxl94/yaai.git
-cd yaai
-cp .env.example .env
-docker compose up -d
-
-# Open http://localhost:8000
-```
 
 ### Load Demo Data
 
@@ -95,25 +116,6 @@ uv run scripts/generate_demo_data.py --drop-all --mode full --dataset all
 # Via Python SDK (yaai.YaaiClient)
 API_KEY=your_key uv run scripts/generate_demo_data_sdk.py --drop-all --mode full --dataset all
 ```
-
-## Running the Server
-
-If you'd rather not use Docker:
-
-```bash
-# You need PostgreSQL running somewhere
-export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/yaai"
-export DATABASE_URL_SYNC="postgresql://user:pass@localhost:5432/yaai"
-
-# Start the server
-uvicorn yaai.server.main:app --host 0.0.0.0 --port 8000
-```
-
-Database migrations are applied automatically on startup via [Alembic](https://alembic.sqlalchemy.org/). No manual migration step needed. Set `AUTO_MIGRATE=false` to disable this and run migrations yourself (`alembic upgrade head`).
-
-The server ships with the frontend baked in — no separate web server needed. Just open `http://localhost:8000` in your browser.
-
-Full API docs at `http://localhost:8000/docs`.
 
 ## Using the SDK
 
@@ -254,10 +256,10 @@ Full interactive API docs at `http://localhost:8000/docs` (Swagger UI).
 ## Screenshots
 
 ### Dashboard
-![Dashboard](docs/screenshots/model_version_dashboard.jpeg)
+![Dashboard](https://raw.githubusercontent.com/Maxl94/yaai/main/docs/screenshots/model_version_dashboard.jpeg)
 
 ### Drift Detection
-![Drift](docs/screenshots/drift_dashboard.jpeg)
+![Drift](https://raw.githubusercontent.com/Maxl94/yaai/main/docs/screenshots/drift_dashboard.jpeg)
 
 ## Features
 
