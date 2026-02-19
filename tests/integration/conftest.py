@@ -141,9 +141,7 @@ def _truncate_all_tables(sync_engine):
 
 
 @pytest.fixture
-async def pg_db(
-    pg_session_factory, pg_sync_engine, pg_engine, _create_tables
-) -> AsyncGenerator[AsyncSession, None]:
+async def pg_db(pg_session_factory, pg_sync_engine, pg_engine, _create_tables) -> AsyncGenerator[AsyncSession, None]:
     """Yield a per-test async session for seeding data.
 
     After the test, disposes the async engine pool (to release any
@@ -265,9 +263,7 @@ async def viewer_client(
 
 
 @pytest.fixture
-async def unauth_client(
-    pg_session_factory: async_sessionmaker, pg_db: AsyncSession
-) -> AsyncGenerator:
+async def unauth_client(pg_session_factory: async_sessionmaker, pg_db: AsyncSession) -> AsyncGenerator:
     """Client with no authentication."""
     from httpx import ASGITransport, AsyncClient
 
