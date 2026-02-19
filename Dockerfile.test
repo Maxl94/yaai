@@ -1,0 +1,21 @@
+# Dockerfile for testing the wheel in a clean environment without building the frontend or wheel
+# 
+# Run on the project root with:
+# cd frontend && npm ci && npm run build-only && cd ..
+# cp -r frontend/dist yaai/server/static
+# uv build --wheel
+#
+# Then build and run the image:
+# docker build -f Dockerfile.test -t yaai-monitoring-test .
+
+FROM python:3.12-slim
+
+EXPOSE 8000
+
+WORKDIR /app
+
+COPY dist/*.whl .
+
+RUN pip install "$(ls *.whl)[server,gcp]"
+
+CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]

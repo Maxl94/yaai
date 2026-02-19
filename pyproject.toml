@@ -51,6 +51,7 @@ packages = ["yaai"]
 [tool.hatch.build.targets.wheel.force-include]
 "yaai/server/alembic.ini" = "yaai/server/alembic.ini"
 "yaai/server/alembic/script.py.mako" = "yaai/server/alembic/script.py.mako"
+"yaai/server/static" = "yaai/server/static"
 
 [tool.ruff]
 line-length = 120
