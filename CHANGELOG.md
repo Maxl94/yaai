@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/Maxl94/yaai/compare/v0.1.3...v0.1.4) (2026-02-19)
+
+
+### Bug Fixes
+
+* adds missing frontend to python wheel and adds dockerfiles for testing ([5054fae](https://github.com/Maxl94/yaai/commit/5054faef8ab30796e109544236940cc81e29fdb7))
+
 ## [0.1.3](https://github.com/Maxl94/yaai/compare/v0.1.2...v0.1.3) (2026-02-19)
 
 
