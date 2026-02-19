@@ -48,6 +48,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["yaai"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"yaai/server/alembic.ini" = "yaai/server/alembic.ini"
+"yaai/server/alembic/script.py.mako" = "yaai/server/alembic/script.py.mako"
+
 [tool.ruff]
 line-length = 120
 
