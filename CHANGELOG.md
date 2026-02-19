@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/Maxl94/yaai/compare/v0.1.5...v0.1.6) (2026-02-19)
+
+
+### Bug Fixes
+
+* adds missing description to dockerfile ([5413ceb](https://github.com/Maxl94/yaai/commit/5413cebf1f6b07e1f0d5e7ab1d7063b6083c9da5))
+
 ## [0.1.5](https://github.com/Maxl94/yaai/compare/v0.1.4...v0.1.5) (2026-02-19)
 
 
