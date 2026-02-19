@@ -30,7 +30,7 @@ from yaai.server.scheduler import load_active_jobs, scheduler
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_SERVER_DIR = Path(__file__).resolve().parent
 
 
 def _apply_migrations() -> None:
@@ -39,7 +39,7 @@ def _apply_migrations() -> None:
     Called on startup to ensure the database schema is always up to date.
     Disable by setting AUTO_MIGRATE=false.
     """
-    alembic_cfg = AlembicConfig(str(_PROJECT_ROOT / "alembic.ini"))
+    alembic_cfg = AlembicConfig(str(_SERVER_DIR / "alembic.ini"))
     alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url_sync)
     command.upgrade(alembic_cfg, "head")
 
