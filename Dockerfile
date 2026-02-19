@@ -19,7 +19,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project --extra server
 
 # Copy source and install the project at build time
-COPY README.md alembic.ini ./
+COPY README.md ./
 COPY yaai/ yaai/
 RUN uv sync --frozen --no-dev --extra server
 
