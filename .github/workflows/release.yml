@@ -100,7 +100,7 @@ jobs:
 
       - name: Copy frontend assets into package
         run: |
-          rm -rf yaai/server/static/*
+          if [ -d "yaai/server/static" ]; then rm -rf yaai/server/static; fi
           cp -r frontend/dist/* yaai/server/static/
 
       - uses: astral-sh/setup-uv@v4
