@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/Maxl94/yaai/compare/v0.1.1...v0.1.2) (2026-02-19)
+
+
+### Bug Fixes
+
+* updates alembic configuration and adjusts paths in main.py ([2c6ee40](https://github.com/Maxl94/yaai/commit/2c6ee40595ec9105257fa76423851db320a8de44))
+
 ## [0.1.1](https://github.com/Maxl94/yaai/compare/v0.1.0...v0.1.1) (2026-02-16)
 
 
