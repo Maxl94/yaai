@@ -97,13 +97,22 @@ class TestGoogleOAuthConfig:
         )
         assert cfg.resolve_role("user@example.com") == "viewer"
 
-    def test_resolve_role_not_listed(self):
+    def test_resolve_role_not_listed_uses_default_role(self):
         cfg = GoogleOAuthConfig(
             enabled=True,
             owner_emails=["admin@example.com"],
             viewer_emails=["user@example.com"],
         )
-        assert cfg.resolve_role("unknown@example.com") is None
+        assert cfg.resolve_role("unknown@example.com") == "viewer"
+
+    def test_resolve_role_not_listed_uses_owner_default_role(self):
+        cfg = GoogleOAuthConfig(
+            enabled=True,
+            default_role="owner",
+            owner_emails=["admin@example.com"],
+            viewer_emails=["user@example.com"],
+        )
+        assert cfg.resolve_role("unknown@example.com") == "owner"
 
     def test_resolve_role_case_insensitive(self):
         cfg = GoogleOAuthConfig(

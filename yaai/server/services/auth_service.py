@@ -163,8 +163,9 @@ class AuthService:
 
         # Check allowed domains
         if google_cfg.allowed_domains:
-            domain = email.split("@")[1] if "@" in email else ""
-            if domain not in google_cfg.allowed_domains:
+            domain = email.rsplit("@", maxsplit=1)[1].lower() if "@" in email else ""
+            allowed_domains = {d.lower() for d in google_cfg.allowed_domains}
+            if domain not in allowed_domains:
                 return None
 
         # Resolve role from email lists (None = access denied)
