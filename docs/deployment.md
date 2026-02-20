@@ -119,6 +119,11 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
           AUTH_OAUTH_GOOGLE_AUTO_CREATE_USERS: "true"
           AUTH_OAUTH_GOOGLE_OWNER_EMAILS: admin@mycompany.com
           # AUTH_OAUTH_GOOGLE_VIEWER_EMAILS: analyst@mycompany.com
+
+          # Google service account auth (SDK clients)
+          AUTH_SERVICE_ACCOUNTS_GOOGLE_ENABLED: "true"
+          AUTH_SERVICE_ACCOUNTS_GOOGLE_ALLOWED_EMAILS: ml-pipeline@my-project.iam.gserviceaccount.com
+          # AUTH_SERVICE_ACCOUNTS_GOOGLE_AUDIENCE: https://yaai.mycompany.com  # defaults to BASE_URL
         depends_on:
           db:
             condition: service_healthy
