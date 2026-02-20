@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/Maxl94/yaai/compare/v0.1.7...v0.2.0) (2026-02-20)
+
+
+### Features
+
+* add Cloud SQL connector and unify auth/database configuration ([4a80588](https://github.com/Maxl94/yaai/commit/4a8058825a1b8785d34b2f5c79c0e3ff997c4e03))
+
 ## [0.1.7](https://github.com/Maxl94/yaai/compare/v0.1.6...v0.1.7) (2026-02-19)
 
 
