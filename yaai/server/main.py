@@ -27,6 +27,11 @@ from yaai.server.rate_limit import limiter
 from yaai.server.routers import auth, dashboard, inferences, jobs, models, schema
 from yaai.server.scheduler import load_active_jobs, scheduler
 
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
