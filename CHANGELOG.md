@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.1](https://github.com/Maxl94/yaai/compare/v0.2.0...v0.2.1) (2026-02-20)
+
+
+### Bug Fixes
+
+* fixes issue with loop for cloud sql iam authentication ([8c351ef](https://github.com/Maxl94/yaai/commit/8c351ef9f07c749afe67197fc3d9447c5a9f140e))
+* improve warning for default DB credentials to include Cloud SQL connector check ([cf34f3f](https://github.com/Maxl94/yaai/commit/cf34f3f7b3713d2526c9793655376d1b17156c77))
+
+
+### Documentation
+
+* adds google service account settings ([921be06](https://github.com/Maxl94/yaai/commit/921be0698afa1eafc31701fe5450deed977dd2f3))
+
 ## [0.2.0](https://github.com/Maxl94/yaai/compare/v0.1.7...v0.2.0) (2026-02-20)
 
 
