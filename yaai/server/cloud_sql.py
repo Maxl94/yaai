@@ -4,6 +4,7 @@ Only imported when CLOUD_SQL_INSTANCE is configured.
 Requires the 'gcp' extra: pip install "yaai-monitoring[gcp]"
 """
 
+import asyncio
 import logging
 
 from google.cloud.sql.connector import Connector, IPTypes
@@ -27,7 +28,8 @@ class CloudSQLConnector:
         self._ip_type = _IP_TYPE_MAP.get(settings.cloud_sql_ip_type.lower(), IPTypes.PUBLIC)
 
     async def startup(self) -> None:
-        self._connector = Connector(refresh_strategy="LAZY")
+
+        self._connector = Connector(loop=asyncio.get_running_loop(), refresh_strategy="LAZY")
         logger.info(
             "Cloud SQL Connector initialized for instance=%s ip_type=%s iam_auth=%s",
             settings.cloud_sql_instance,
