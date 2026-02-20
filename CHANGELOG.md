@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3](https://github.com/Maxl94/yaai/compare/v0.2.2...v0.2.3) (2026-02-20)
+
+
+### Bug Fixes
+
+* add automatic migration on startup ([0023ee3](https://github.com/Maxl94/yaai/commit/0023ee32924f0f3c8974f810dd659c96901a43ef))
+* improves logging ([4751277](https://github.com/Maxl94/yaai/commit/47512770703e62f6d6f926404e8462eb01c81add))
+
 ## [0.2.2](https://github.com/Maxl94/yaai/compare/v0.2.1...v0.2.2) (2026-02-20)
 
 
