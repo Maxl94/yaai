@@ -17,7 +17,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from yaai.server import database
 from yaai.server.auth.config import load_auth_config, validate_auth_config
-from yaai.server.auth.dependencies import get_auth_config, set_auth_config
+from yaai.server.auth.dependencies import set_auth_config
 from yaai.server.auth.oauth import setup_oauth
 from yaai.server.auth.passwords import hash_password
 from yaai.server.config import settings

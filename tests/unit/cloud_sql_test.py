@@ -151,9 +151,7 @@ class TestInitEngine:
 
             database.init_engine()
 
-            mock_create.assert_called_with(
-                database.settings.database_url, echo=False
-            )
+            mock_create.assert_called_with(database.settings.database_url, echo=False)
             assert database.engine is not None
             assert database.async_session is not None
 
@@ -224,9 +222,7 @@ class TestApplyMigrations:
 
             main_mod._apply_migrations(sync_creator=mock_creator)
 
-            mock_create.assert_called_once_with(
-                "postgresql+pg8000://", creator=mock_creator
-            )
+            mock_create.assert_called_once_with("postgresql+pg8000://", creator=mock_creator)
             assert mock_cfg.attributes["connection"] is mock_connection
             mock_command.upgrade.assert_called_once_with(mock_cfg, "head")
             mock_cfg.set_main_option.assert_not_called()
