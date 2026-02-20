@@ -144,6 +144,10 @@ AUTH_OAUTH_GOOGLE_OWNER_EMAILS=admin@example.com
 AUTH_OAUTH_GOOGLE_VIEWER_EMAILS=user@example.com
 ```
 
+`AUTH_OAUTH_GOOGLE_OWNER_EMAILS` and `AUTH_OAUTH_GOOGLE_VIEWER_EMAILS` are optional explicit overrides.
+Users from `AUTH_OAUTH_GOOGLE_ALLOWED_DOMAINS` who are not in those lists are assigned
+`AUTH_OAUTH_GOOGLE_DEFAULT_ROLE` (defaults to `viewer`).
+
 > [!IMPORTANT]
 > When Google OAuth is enabled, local username/password authentication is automatically disabled. Users must sign in with their Google account.
 

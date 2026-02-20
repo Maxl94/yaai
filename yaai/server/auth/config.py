@@ -52,12 +52,14 @@ class GoogleOAuthConfig(BaseSettings):
         return _parse_comma_separated(v)
 
     def resolve_role(self, email: str) -> str | None:
-        """Return role for the email, or None if not in any list (access denied)."""
+        """Return role for an email, preferring explicit lists and falling back to default_role."""
         lower = email.lower()
         if lower in {e.lower() for e in self.owner_emails}:
             return "owner"
         if lower in {e.lower() for e in self.viewer_emails}:
             return "viewer"
+        if self.default_role in {"owner", "viewer"}:
+            return self.default_role
         return None
 
 
