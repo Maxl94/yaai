@@ -28,7 +28,7 @@ from yaai.server.routers import auth, dashboard, inferences, jobs, models, schem
 from yaai.server.scheduler import load_active_jobs, scheduler
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(levelname)s - %(name)s - %(message)s",
     level=logging.INFO,
 )
 
@@ -94,6 +94,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize Cloud SQL connector if configured
     if settings.cloud_sql_instance:
+        logger.info("Starting Cloud SQL Connector for instance: %s", settings.cloud_sql_instance)
         from yaai.server.cloud_sql import CloudSQLConnector
 
         cloud_sql = CloudSQLConnector()
@@ -104,6 +105,7 @@ async def lifespan(app: FastAPI):
     from yaai.server.auth.dependencies import _auth_config as _existing
 
     if _existing is None:
+        logger.info("Loading authentication configuration...")
         auth_config = load_auth_config()
         auth_config = validate_auth_config(auth_config)
         set_auth_config(auth_config)
@@ -111,29 +113,38 @@ async def lifespan(app: FastAPI):
         auth_config = _existing
 
     if auth_config.oauth.google.enabled:
+        logger.info("Setting up Google OAuth...")
         setup_oauth(auth_config)
 
     # Apply database migrations on startup (disable with AUTO_MIGRATE=false)
     if os.environ.get("AUTO_MIGRATE", "true").lower() in ("true", "1", "yes"):
+        logger.info("Applying database migrations...")
         _apply_migrations(sync_creator=cloud_sql.sync_creator if cloud_sql else None)
+        logger.info("Database migrations applied successfully.")
     else:
         logger.info("AUTO_MIGRATE is disabled — skipping automatic migrations.")
 
     # Create default admin account if no users exist (local auth only)
     if auth_config.enabled and auth_config.local_enabled:
+        logger.info("Bootstrapping admin user...")
         await _bootstrap_admin()
 
     # Start job scheduler
     async with database.async_session() as db:
+        logger.info("Loading active jobs into scheduler...")
         await load_active_jobs(db)
     scheduler.start()
 
+    logger.info("Startup complete.")
+
     yield
 
+    logger.info("Shutting down...")
     scheduler.shutdown(wait=False)
 
     if cloud_sql:
         await cloud_sql.shutdown()
+    logger.info("Shutdown complete.")
 
 
 app = FastAPI(
