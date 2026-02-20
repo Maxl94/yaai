@@ -56,7 +56,7 @@ python scripts/generate_demo_data.py --mode full \
 | `--version` | auto | Version string (auto-generated if not provided) |
 | `--weeks` | 8 | Number of weeks of data to generate |
 | `--records-per-day` | 100 | Number of inference records per day |
-| `--api-url` | http://localhost:8000/api | Backend API URL |
+| `--api-url` | http://localhost:8000/api/v1 | Backend API URL |
 
 ### What `full` mode creates
 

@@ -25,11 +25,16 @@ Most ML monitoring tools make you configure dashboards by hand, wire up custom p
 No pipeline integration. No YAML property mappings. No dashboard builder.
 The schema is the config.
 
-## What's in here
+> [!TIP]
+> **New here?** Start with the **[Getting Started](getting-started.md)** guide -- it takes you from zero to dashboards in five minutes.
+
+## Documentation
 
 <div class="grid cards" markdown>
 
 - **[Getting Started](getting-started.md)** -- from zero to dashboards in five minutes
+- **[Server Setup](server-setup.md)** -- local development with PostgreSQL, env vars, authentication
+- **[Deployment](deployment.md)** -- Docker Compose, pip install, Google Cloud SQL
 - **[Core Concepts](concepts.md)** -- models, versions, schemas, drift -- how the pieces fit
 - **[Drift Detection Guide](drift-guide.md)** -- PSI, KS test, Chi-squared, JSD explained with visuals
 - **[Architecture](architecture.md)** -- system design, tech stack, how the backend is structured

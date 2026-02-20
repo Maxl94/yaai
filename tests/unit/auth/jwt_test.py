@@ -1,6 +1,6 @@
 """Unit tests for JWT token creation and validation."""
 
-import time
+from datetime import UTC, datetime, timedelta
 
 import jwt as pyjwt
 import pytest
@@ -16,9 +16,6 @@ def auth_config():
         enabled=True,
         jwt=JWTConfig(
             secret=SecretStr("test-secret-key-for-unit-tests!!"),
-            algorithm="HS256",
-            access_token_expire_minutes=60,
-            refresh_token_expire_days=30,
         ),
     )
 
@@ -64,17 +61,12 @@ def test_decode_token_invalid_secret(auth_config):
 
 
 def test_decode_token_expired(auth_config):
-    config = AuthConfig(
-        enabled=True,
-        jwt=JWTConfig(
-            secret=SecretStr("test-secret-key-for-unit-tests!!"),
-            access_token_expire_minutes=0,  # expires immediately
-        ),
-    )
-    token = create_access_token(config, subject="user", role="owner")
-    time.sleep(0.1)
+    # Create a token that is already expired
+    expired = datetime.now(UTC) - timedelta(seconds=1)
+    payload = {"sub": "user", "role": "owner", "type": "access", "exp": expired}
+    token = pyjwt.encode(payload, "test-secret-key-for-unit-tests!!", algorithm="HS256")
     with pytest.raises(pyjwt.ExpiredSignatureError):
-        decode_token(config, token)
+        decode_token(auth_config, token)
 
 
 def test_decode_token_malformed(auth_config):

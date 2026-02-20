@@ -6,41 +6,28 @@
   <strong>Yet Another AI Monitoring</strong> — because the existing ones didn't fit and building your own seemed like a good idea at the time.
 </p>
 
+<p align="center">
+  <a href="https://maxl94.github.io/yaai/">Documentation</a> &nbsp;·&nbsp;
+  <a href="https://maxl94.github.io/yaai/getting-started/">Getting Started</a> &nbsp;·&nbsp;
+  <a href="https://maxl94.github.io/yaai/server-setup/">Server Setup</a> &nbsp;·&nbsp;
+  <a href="https://maxl94.github.io/yaai/deployment/">Deployment</a>
+</p>
+
+---
+
 ![Models Overview](https://raw.githubusercontent.com/Maxl94/yaai/main/docs/screenshots/models.jpeg)
 
 ## Why This Exists
 
-I wanted ML monitoring that's:
+Most ML monitoring tools make you configure dashboards by hand, wire up custom pipelines, and learn their specific way of thinking before you see any value. YAAI takes a different approach:
+
 - **REST-based** — send JSON, done
 - **Auto-everything** — dashboards, drift detection, comparisons generated from your schema
-- **Zero config** — no YAML files, no property mappings, no pipeline integrations (except server config)
+- **Zero config** — no YAML files, no property mappings, no pipeline integrations
 
 Define your fields once (or let YAAI guess them), send data, get insights.
 
-## When to Use YAAI
-
-Use this if you:
-- Want monitoring up and running in minutes, not days
-- Prefer REST APIs over SDK-heavy integrations
-- Don't want to configure dashboards manually
-- Need drift detection without becoming a drift detection expert
-- Value simplicity over feature completeness
-
-## When NOT to Use YAAI
-
-This might not be for you if you need:
-- **Deep ML pipeline integration** — check out [Evidently](https://github.com/evidentlyai/evidently)
-- **Custom drift algorithms** — we use standard methods (PSI, KS, Chi-squared, JS divergence)
-- **Multi-tenant SaaS deployment** — this is self-hosted, single-tenant
-- **Battle-tested production stability** — this is young software, treat it accordingly
-
-Those tools are more powerful. YAAI is more opinionated and simpler.
-
 ## Quick Start
-
-### Option A: Docker Compose (recommended)
-
-The easiest way — PostgreSQL is included, no extra setup needed.
 
 ```bash
 git clone https://github.com/Maxl94/yaai.git
@@ -51,90 +38,19 @@ docker compose up -d
 
 Open **http://localhost:8000** — the server and frontend are ready.
 
-The default `.env` ships with API key auth enabled and a default admin account. See `.env.example` for all available settings.
+Default login: `admin` / check the server logs for the generated password.
 
-### Option B: Install from PyPI
-
-If you want to run the server directly (you'll need your own PostgreSQL instance):
-
-```bash
-pip install yaai-monitoring[server]
-```
-
-Set the minimum required environment variables:
-
-```bash
-export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/yaai"
-export DATABASE_URL_SYNC="postgresql://user:pass@localhost:5432/yaai"
-export AUTH_JWT_SECRET="$(openssl rand -base64 32)"
-export SESSION_SECRET="$(openssl rand -base64 32)"
-export AUTH_DEFAULT_ADMIN_PASSWORD="changeme"
-
-uvicorn yaai.server.main:app --host 0.0.0.0 --port 8000
-```
-
-Database migrations are applied automatically on startup via [Alembic](https://alembic.sqlalchemy.org/). Set `AUTO_MIGRATE=false` to disable this and run migrations yourself.
-
-Open **http://localhost:8000** — the frontend is bundled with the server.
-
-Full API docs at **http://localhost:8000/docs**.
+For detailed setup instructions, see the **[Server Setup Guide](https://maxl94.github.io/yaai/server-setup/)** (development) or the **[Deployment Guide](https://maxl94.github.io/yaai/deployment/)** (production).
 
 ## Installation
 
-YAAI ships as two things: a lightweight **Python SDK** and a self-hosted **monitoring server**.
-
-### SDK only
-
-For sending inference data from your services:
-
 ```bash
-pip install yaai-monitoring
+pip install yaai-monitoring              # SDK only (httpx + pydantic)
+pip install "yaai-monitoring[server]"    # Full server
+pip install "yaai-monitoring[server,gcp]" # Server + Google Cloud support
 ```
 
-This installs just `httpx` and `pydantic`. No heavy dependencies. If you authenticate with Google service accounts instead of API keys, install with `pip install yaai-monitoring[gcp]` to add `google-auth`.
-
-### Server (includes SDK)
-
-For running the full monitoring platform:
-
-```bash
-pip install yaai-monitoring[server]
-```
-
-This pulls in FastAPI, SQLAlchemy, scikit-learn, and friends. You'll also need PostgreSQL.
-
-### Load Demo Data
-
-Two scripts are included — they produce identical results, one uses raw HTTP, the other uses the SDK:
-
-```bash
-uv sync
-
-# Via REST API (httpx)
-uv run scripts/generate_demo_data.py --drop-all --mode full --dataset all
-
-# Via Python SDK (yaai.YaaiClient)
-API_KEY=your_key uv run scripts/generate_demo_data_sdk.py --drop-all --mode full --dataset all
-```
-
-## Using the SDK
-
-The SDK is async. It handles model registration and inference logging for service accounts.
-
-### Authentication
-
-```python
-# Option 1: Explicit API key
-client = YaaiClient("http://localhost:8000/api/v1", api_key="yaam_...")
-
-# Option 2: Google Application Default Credentials (requires yaai[gcp])
-# Uses GOOGLE_APPLICATION_CREDENTIALS env var, workload identity, or GCP metadata server
-client = YaaiClient("http://localhost:8000/api/v1")
-```
-
-When no `api_key` is passed, the client automatically uses Google ADC. Tokens are refreshed transparently before they expire. The server must have Google service account auth enabled and the SA email allowlisted — see the auth configuration docs.
-
-### Example
+## SDK Example
 
 ```python
 import asyncio
@@ -143,11 +59,7 @@ from yaai.schemas.model import SchemaFieldCreate
 
 async def main():
     async with YaaiClient("http://localhost:8000/api/v1", api_key="yaam_...") as client:
-
-        # Create a model
         model = await client.create_model("fraud-detector")
-
-        # Define a version with schema
         version = await client.create_model_version(
             model_id=model.id,
             version="v1.0",
@@ -157,15 +69,6 @@ async def main():
                 SchemaFieldCreate(field_name="is_fraud", direction="output", data_type="categorical"),
             ],
         )
-
-        # Log a single inference
-        inference = await client.add_inference(
-            model_version_id=version.id,
-            inputs={"amount": 150.0, "country": "DE"},
-            outputs={"is_fraud": "false"},
-        )
-
-        # Or log a batch
         await client.add_inferences(
             model_version_id=version.id,
             records=[
@@ -176,82 +79,6 @@ async def main():
 
 asyncio.run(main())
 ```
-
-### SDK Methods
-
-| Method | What it does |
-|---|---|
-| `create_model(name)` | Register a new model |
-| `get_model(model_id)` | Fetch model details |
-| `list_models()` | List all models |
-| `delete_model(model_id)` | Delete a model and all its data |
-| `create_model_version(model_id, version, schema_fields)` | Create a versioned schema |
-| `add_inference(model_version_id, inputs, outputs)` | Log one inference |
-| `add_inferences(model_version_id, records)` | Log a batch of inferences |
-| `add_reference_data(model_id, model_version_id, records)` | Upload reference/baseline data |
-| `add_ground_truth(inference_id, label)` | Attach ground truth to an inference |
-| `get_version_job(model_id, model_version_id)` | Get the drift job for a version |
-| `get_job(job_id)` | Fetch job details |
-| `update_job(job_id, **fields)` | Update job configuration |
-| `trigger_job(job_id)` | Trigger a drift detection run |
-| `backfill_job(job_id)` | Trigger historical drift backfill |
-| `infer_schema(sample)` | Infer schema from a single sample |
-| `infer_schema_batch(samples)` | Infer schema from multiple samples |
-| `validate_schema(schema_fields, inputs, outputs)` | Validate a record against an inline schema |
-| `validate_schema_batch(schema_fields, records)` | Validate a batch against an inline schema |
-| `validate_model_version_schema(model_id, version_id, inputs, outputs)` | Validate a record against a version's schema |
-| `validate_model_version_schema_batch(model_id, version_id, records)` | Validate a batch against a version's schema |
-
-The SDK is intentionally minimal. It covers what a service account should do: register models, send data. The dashboards, drift detection, and alerting happen server-side automatically.
-
-## Using the REST API Directly
-
-No SDK required. The API accepts plain JSON — use curl, httpx, requests, or whatever you like:
-
-```bash
-# Create a model
-curl -X POST http://localhost:8000/api/v1/models \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: yaam_..." \
-  -d '{"name": "fraud-detector"}'
-
-# Add a version with schema
-curl -X POST http://localhost:8000/api/v1/models/{model_id}/versions \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: yaam_..." \
-  -d '{
-    "version": "v1.0",
-    "schema": [
-      {"field_name": "amount", "direction": "input", "data_type": "numerical"},
-      {"field_name": "country", "direction": "input", "data_type": "categorical"},
-      {"field_name": "is_fraud", "direction": "output", "data_type": "categorical"}
-    ]
-  }'
-
-# Send inference data
-curl -X POST http://localhost:8000/api/v1/inferences \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: yaam_..." \
-  -d '{
-    "model_version_id": "{version_id}",
-    "inputs": {"amount": 150.0, "country": "DE"},
-    "outputs": {"is_fraud": false}
-  }'
-
-# Send a batch
-curl -X POST http://localhost:8000/api/v1/inferences/batch \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: yaam_..." \
-  -d '{
-    "model_version_id": "{version_id}",
-    "records": [
-      {"inputs": {"amount": 42.0, "country": "US"}, "outputs": {"is_fraud": false}},
-      {"inputs": {"amount": 9001.0, "country": "NG"}, "outputs": {"is_fraud": true}}
-    ]
-  }'
-```
-
-Full interactive API docs at `http://localhost:8000/docs` (Swagger UI).
 
 ## Screenshots
 
@@ -268,135 +95,42 @@ Full interactive API docs at `http://localhost:8000/docs` (Swagger UI).
 - **Scheduled jobs** — cron-based checks with configurable windows
 - **Auto-dashboards** — per-feature distribution charts
 - **Time comparisons** — compare any two periods side by side
-- **Alerting** — threshold-based notifications
 - **Auth** — local accounts, Google OAuth, API keys, Google service accounts
+- **Cloud SQL support** — IAM-authenticated connections to Google Cloud SQL
 
-## Architecture
+## Documentation
 
-```
-┌──────────────────────────────────────────┐
-│            Vue 3 Frontend (SPA)          │
-│     Vuetify · ECharts · TypeScript       │
-├──────────────────────────────────────────┤
-│            FastAPI Backend               │
-│   REST API · APScheduler · Drift Engine  │
-├──────────────────────────────────────────┤
-│              PostgreSQL 16               │
-│          JSONB inference storage          │
-└──────────────────────────────────────────┘
+Full documentation is available at **[maxl94.github.io/yaai](https://maxl94.github.io/yaai/)**.
 
-pip install yaai-monitoring          → just the SDK (httpx + pydantic)
-pip install yaai-monitoring[server]  → everything above
-```
+- [Getting Started](https://maxl94.github.io/yaai/getting-started/) — from zero to dashboards in five minutes
+- [Server Setup](https://maxl94.github.io/yaai/server-setup/) — local development with PostgreSQL, env vars, authentication
+- [Deployment](https://maxl94.github.io/yaai/deployment/) — Docker Compose, pip install, Google Cloud SQL
+- [Core Concepts](https://maxl94.github.io/yaai/concepts/) — models, versions, schemas, drift detection
+- [Drift Detection Guide](https://maxl94.github.io/yaai/drift-guide/) — deep dive into the four drift metrics
+- [REST API Reference](https://maxl94.github.io/yaai/reference/api/) — full OpenAPI spec
+- [Python SDK Reference](https://maxl94.github.io/yaai/reference/sdk/) — async client docs
 
 ## Development
 
-There are two ways to run YAAI locally, depending on what you need:
-
-| | **Local dev servers** (recommended for development) | **Docker Compose** |
-|---|---|---|
-| **What runs** | Backend + frontend as separate processes with hot-reload | Everything in Docker containers |
-| **Frontend hot-reload** | Yes — instant feedback on UI changes | No — rebuild required |
-| **Backend hot-reload** | Yes — auto-restarts on Python changes | No — rebuild required |
-| **Google OAuth** | Does not work (different origins) | Works |
-| **Auth for development** | API key or local accounts | Any (including Google OAuth) |
-| **Prerequisites** | Python 3.12+, Node.js 20+, Docker, [uv](https://docs.astral.sh/uv/) | Docker only |
-
-> **Why can't Google OAuth work with local dev servers?** The frontend (port 3000) and backend (port 8000) run on different origins. OAuth redirects require a single origin, which only works when the backend serves the frontend itself (same port). For day-to-day development this doesn't matter — use API key auth or local accounts instead.
-
-### Option A: Local dev servers (recommended)
-
-Best for active development — you get hot-reload on both frontend and backend.
-
-#### 1. Start the database
-
 ```bash
+# Start database
 docker compose up db -d
-```
 
-This starts **only** the PostgreSQL database in Docker, exposed on port **5431** (not the default 5432, to avoid conflicts with any local PostgreSQL).
-
-> **Don't run `docker compose up` without `db`** — that also starts the backend in Docker and blocks port 8000.
-
-#### 2. Install dependencies
-
-```bash
-# Backend (SDK + server + dev tools)
+# Install dependencies
 uv sync
-
-# Frontend
 cd frontend && npm ci && cd ..
-```
 
-#### 3. Configure environment
-
-```bash
+# Start backend (hot-reload)
 cp .env.example .env
-```
-
-The example config has Google OAuth **disabled** and API key auth **enabled** — that's all you need for local development. No Google credentials required. All auth settings use the `AUTH_` prefix (see `.env.example` for the full list).
-
-#### 4. Start the backend
-
-```bash
 uv run uvicorn yaai.server.main:app --reload --reload-dir yaai --host 0.0.0.0 --port 8000
-```
 
-The API server starts on **http://localhost:8000** with auto-reload. API docs are at **http://localhost:8000/docs**.
-
-> **"Address already in use"?** Port 8000 is already taken — most likely by the Docker backend container. Make sure you started only `docker compose up db -d` (not the full stack). Check with `lsof -i :8000` and stop the conflicting process, or use a different port (e.g. `--port 8001`). If you change the backend port, also update the proxy target in [frontend/vite.config.ts](frontend/vite.config.ts).
-
-#### 5. Start the frontend (separate terminal)
-
-```bash
+# Start frontend (separate terminal, hot-reload)
 cd frontend && npm run dev
 ```
 
-The Vue dev server runs on **http://localhost:3000** and proxies `/api` requests to the backend on port 8000. Open **http://localhost:3000** in your browser.
-
-### Option B: Docker Compose
-
-Best for testing the full stack as-is, or when you need Google OAuth. No Python or Node.js install required — just Docker.
-
 ```bash
-# Start everything (builds frontend + backend into one container)
-docker compose up --build
-```
-
-Open **http://localhost:8000**. The backend serves the frontend on the same origin, so Google OAuth works.
-
-To use Google OAuth, set these variables in your `.env` file:
-- `AUTH_OAUTH_GOOGLE_ENABLED=true`
-- `AUTH_OAUTH_GOOGLE_CLIENT_ID` and `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` to your Google Cloud credentials
-- The OAuth redirect URI in Google Cloud Console to `http://localhost:8000/api/v1/auth/oauth/google/callback`
-
-### Option A+B hybrid: Build frontend locally, serve from backend
-
-If you want Google OAuth without Docker but don't need frontend hot-reload:
-
-```bash
-# Build the frontend
-cd frontend && npm run build-only && cd ..
-
-# Copy the build output into the backend's static directory
-cp -r frontend/dist/* yaai/server/static/
-
-# Start the backend (serves both API and frontend on port 8000)
-uv run uvicorn yaai.server.main:app --reload --reload-dir yaai --host 0.0.0.0 --port 8000
-```
-
-Open **http://localhost:8000**. You'll need to rebuild and copy again after frontend changes.
-
-### Running tests
-
-```bash
-# Backend tests
+# Run tests
 uv run pytest
-
-# Linting
-uv run ruff check .
-
-# Frontend type-checking
 cd frontend && npm run type-check
 ```
 

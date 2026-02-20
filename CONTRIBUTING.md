@@ -13,56 +13,24 @@ You'll need the following installed on your machine:
 
 ## Setup
 
-There are two ways to run YAAI locally — see the [Development section in the README](README.md#development) for a comparison table. In short:
-
-- **Local dev servers (recommended):** Frontend + backend run separately with hot-reload. Google OAuth won't work (different origins) — use API key or local accounts instead.
-- **Docker Compose:** Everything runs in containers on one port. Google OAuth works, but no hot-reload.
-
-Most contributors will want the local dev servers. Here's the setup:
+Follow the [Server Setup](https://maxl94.github.io/yaai/server-setup/) guide to get the backend and frontend running locally. The short version:
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/Maxl94/yaai.git
 cd yaai
-
-# 2. Start ONLY the database in Docker (not the full stack!)
-#    'docker compose up' without 'db' also starts the backend and blocks port 8000.
 docker compose up db -d
-
-# 3. Install dependencies
-uv sync                          # backend (SDK + server + dev tools)
-cd frontend && npm ci && cd ..   # frontend
-
-# 4. Set up environment for local development
-#    The example file has Google OAuth disabled and API key auth enabled — that's fine for dev.
+uv sync
+cd frontend && npm ci && cd ..
 cp .env.example .env
-```
 
-### Running the backend
-
-```bash
+# Backend (terminal 1)
 uv run uvicorn yaai.server.main:app --reload --reload-dir yaai --host 0.0.0.0 --port 8000
-```
 
-The API server starts on **http://localhost:8000**. Interactive API docs are at **http://localhost:8000/docs**.
-
-> **"Address already in use"?** Port 8000 is already taken — most likely by the Docker backend container. Make sure you started only `docker compose up db -d` (not the full stack). Check with `lsof -i :8000` and stop the conflicting process, or use a different port (e.g. `--port 8001`). If you change the backend port, also update the proxy target in `frontend/vite.config.ts`.
-
-### Running the frontend (separate terminal)
-
-```bash
+# Frontend (terminal 2)
 cd frontend && npm run dev
 ```
 
-The Vue dev server runs on **http://localhost:3000** and proxies `/api` requests to the backend on port 8000. Open **http://localhost:3000** in your browser.
-
-### Loading demo data (optional)
-
-If you want to see the app with data right away:
-
-```bash
-uv run scripts/generate_demo_data.py --drop-all --mode full --dataset all
-```
+Open **http://localhost:3000** in your browser.
 
 ## Running Tests
 
@@ -90,7 +58,7 @@ If you change a SQLAlchemy model (add/remove/rename a column, create a new table
 docker compose up db -d
 
 # Generate the migration
-DATABASE_URL_SYNC="postgresql://aimon:changeme@localhost:5431/aimonitoring" \
+DATABASE_URL="postgresql+asyncpg://aimon:changeme@localhost:5431/aimonitoring" \
   uv run alembic revision --autogenerate -m "short description of change"
 ```
 

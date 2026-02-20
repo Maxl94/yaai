@@ -17,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from yaai.server.auth.config import (
     APIKeyServiceConfig,
     AuthConfig,
+    GoogleOAuthConfig,
     JWTConfig,
-    LocalAuthConfig,
+    OAuthConfig,
     ServiceAccountsConfig,
 )
 from yaai.server.auth.dependencies import (
@@ -43,11 +44,8 @@ AUTH_CONFIG = AuthConfig(
     enabled=True,
     jwt=JWTConfig(
         secret=SecretStr("integration-test-jwt-secret-32chars!"),
-        algorithm="HS256",
-        access_token_expire_minutes=60,
-        refresh_token_expire_days=30,
     ),
-    local=LocalAuthConfig(enabled=True, allow_registration=False),
+    oauth=OAuthConfig(google=GoogleOAuthConfig(enabled=False)),
     service_accounts=ServiceAccountsConfig(
         api_keys=APIKeyServiceConfig(enabled=True),
     ),

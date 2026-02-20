@@ -47,7 +47,7 @@ class AuthService:
         rt = RefreshToken(
             user_id=user.id,
             jti=jti,
-            expires_at=datetime.now(UTC) + timedelta(days=self.config.jwt.refresh_token_expire_days),
+            expires_at=datetime.now(UTC) + timedelta(days=self.config.jwt.REFRESH_TOKEN_EXPIRE_DAYS),
         )
         self.db.add(rt)
         await self.db.commit()

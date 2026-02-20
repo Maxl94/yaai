@@ -13,10 +13,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Use DATABASE_URL_SYNC from environment if set; otherwise fall back to alembic.ini
-_db_url = os.environ.get("DATABASE_URL_SYNC")
+# Derive sync URL from DATABASE_URL (strip +asyncpg driver) if set
+_db_url = os.environ.get("DATABASE_URL")
 if _db_url:
-    config.set_main_option("sqlalchemy.url", _db_url)
+    import re
+
+    config.set_main_option("sqlalchemy.url", re.sub(r"\+asyncpg", "", _db_url))
 
 target_metadata = Base.metadata
 
@@ -29,6 +31,14 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    # If a connection was provided (e.g. from Cloud SQL connector), use it directly
+    connectable = config.attributes.get("connection", None)
+    if connectable is not None:
+        context.configure(connection=connectable, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
