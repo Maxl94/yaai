@@ -32,8 +32,8 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Warn about default DB credentials
-if "changeme" in settings.database_url:
+# Warn about default DB credentials (skip when Cloud SQL connector is used)
+if "changeme" in settings.database_url and not settings.cloud_sql_instance:
     _is_prod = os.environ.get("ENVIRONMENT", "development").lower() in ("production", "prod")
     if _is_prod:
         raise RuntimeError(
