@@ -21,15 +21,16 @@ class JWTConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTH_JWT_", env_file=".env", extra="ignore")
 
     secret: SecretStr = SecretStr("")
-    algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60
-    refresh_token_expire_days: int = 30
+
+    # Hardcoded — not configurable (reduces attack surface)
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
 
 class LocalAuthConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTH_LOCAL_", env_file=".env", extra="ignore")
 
-    enabled: bool = True
     allow_registration: bool = False
 
 
@@ -92,11 +93,15 @@ class AuthConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTH_", env_file=".env", extra="ignore")
 
     enabled: bool = True
-    default_admin_password: str = "changeme"
     jwt: JWTConfig = Field(default_factory=JWTConfig)
     local: LocalAuthConfig = Field(default_factory=LocalAuthConfig)
     oauth: OAuthConfig = Field(default_factory=OAuthConfig)
     service_accounts: ServiceAccountsConfig = Field(default_factory=ServiceAccountsConfig)
+
+    @property
+    def local_enabled(self) -> bool:
+        """Local auth is enabled when Google OAuth is NOT enabled."""
+        return not self.oauth.google.enabled
 
 
 def load_auth_config() -> AuthConfig:
@@ -119,21 +124,18 @@ def _validate_jwt_secret(config: AuthConfig, is_prod: bool) -> None:
     if jwt_secret not in _INSECURE_JWT_SECRETS:
         return
 
+    # Always auto-generate a strong secret when unset or insecure
+    config.jwt.secret = SecretStr(_secrets.token_urlsafe(32))
     if is_prod:
-        raise RuntimeError(
-            "FATAL: JWT secret is insecure. Set AUTH_JWT_SECRET environment variable "
-            "to a strong random value (e.g. openssl rand -base64 32)."
-        )
-    if jwt_secret == "":
-        config.jwt.secret = SecretStr(_secrets.token_urlsafe(32))
         logger.warning(
             "AUTH_JWT_SECRET not configured — generated ephemeral secret. "
-            "Sessions will NOT survive restarts. Set AUTH_JWT_SECRET for persistence."
+            "User sessions will NOT survive server restarts. "
+            "Set AUTH_JWT_SECRET for persistence (e.g. openssl rand -base64 32)."
         )
     else:
         logger.warning(
-            "SECURITY WARNING: Using insecure default JWT secret. "
-            "Set AUTH_JWT_SECRET environment variable for production."
+            "AUTH_JWT_SECRET not configured — generated ephemeral secret. "
+            "Sessions will NOT survive restarts. Set AUTH_JWT_SECRET for persistence."
         )
 
 
@@ -144,12 +146,6 @@ def validate_auth_config(config: AuthConfig) -> AuthConfig:
     if not config.enabled:
         logger.info("Authentication is DISABLED — all endpoints are open")
         return config
-
-    # --- Google OAuth: auto-disable local auth ---
-    if config.oauth.google.enabled:
-        if config.local.enabled:
-            config.local.enabled = False
-            logger.info("Google OAuth is enabled — local authentication auto-disabled")
 
     # --- Google OAuth: allowed_domains ---
     if config.oauth.google.enabled and not config.oauth.google.allowed_domains:
@@ -164,18 +160,14 @@ def validate_auth_config(config: AuthConfig) -> AuthConfig:
             "any Google account can log in. Set AUTH_OAUTH_GOOGLE_ALLOWED_DOMAINS for production."
         )
 
-    # --- Google SA: audience required ---
+    # --- Google SA: default audience to BASE_URL ---
     if config.service_accounts.google.enabled and not config.service_accounts.google.audience:
-        if is_prod:
-            raise RuntimeError(
-                "FATAL: audience must be configured when Google service account auth is enabled. "
-                "ID token verification requires an audience to prevent token replay attacks. "
-                "Set AUTH_SERVICE_ACCOUNTS_GOOGLE_AUDIENCE."
-            )
-        logger.warning(
-            "SECURITY WARNING: Google SA auth enabled without audience — "
-            "ID tokens will not be audience-checked. "
-            "Set AUTH_SERVICE_ACCOUNTS_GOOGLE_AUDIENCE for production."
+        from yaai.server.config import settings
+
+        config.service_accounts.google.audience = settings.base_url
+        logger.info(
+            "AUTH_SERVICE_ACCOUNTS_GOOGLE_AUDIENCE not set — defaulting to BASE_URL (%s)",
+            settings.base_url,
         )
 
     _validate_jwt_secret(config, is_prod)

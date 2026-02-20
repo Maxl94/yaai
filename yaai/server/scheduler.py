@@ -18,10 +18,10 @@ async def _execute_scheduled_job(job_config_id: str) -> None:
     """Called by APScheduler when a cron trigger fires."""
     import uuid
 
-    from yaai.server.database import async_session
+    from yaai.server import database
     from yaai.server.services.drift_service import DriftService
 
-    async with async_session() as db:
+    async with database.async_session() as db:
         svc = DriftService(db)
         try:
             run = await svc.execute_job(uuid.UUID(job_config_id))

@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from yaai.server.auth.config import AuthConfig, JWTConfig, LocalAuthConfig
+from yaai.server.auth.config import AuthConfig, GoogleOAuthConfig, JWTConfig, LocalAuthConfig, OAuthConfig
 from yaai.server.auth.dependencies import (
     get_current_identity,
     require_auth,
@@ -35,12 +35,10 @@ TestingSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 AUTH_CONFIG = AuthConfig(
     enabled=True,
     jwt=JWTConfig(
-        secret=SecretStr("integration-test-jwt-secret"),
-        algorithm="HS256",
-        access_token_expire_minutes=60,
-        refresh_token_expire_days=30,
+        secret=SecretStr("integration-test-jwt-secret-32chars!"),
     ),
-    local=LocalAuthConfig(enabled=True, allow_registration=False),
+    local=LocalAuthConfig(allow_registration=False),
+    oauth=OAuthConfig(google=GoogleOAuthConfig(enabled=False)),
 )
 
 

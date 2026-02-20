@@ -4,7 +4,21 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from yaai.server.auth.config import AuthConfig
+# Prevent all auth BaseSettings classes from reading .env during tests.
+# This ensures tests are deterministic regardless of what's in the developer's .env file.
+# Tests that need specific env values use monkeypatch.setenv() which sets os.environ directly.
+from yaai.server.auth.config import (
+    APIKeyServiceConfig,
+    AuthConfig,
+    GoogleOAuthConfig,
+    GoogleSAConfig,
+    JWTConfig,
+    LocalAuthConfig,
+)
+
+for _cls in (JWTConfig, LocalAuthConfig, GoogleOAuthConfig, GoogleSAConfig, APIKeyServiceConfig, AuthConfig):
+    _cls.model_config["env_file"] = None
+
 from yaai.server.auth.dependencies import (
     CurrentIdentity,
     get_current_identity,

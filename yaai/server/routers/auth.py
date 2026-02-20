@@ -19,6 +19,7 @@ from yaai.server.auth.dependencies import (
 from yaai.server.auth.jwt import decode_token
 from yaai.server.auth.oauth import get_oauth
 from yaai.server.auth.passwords import verify_password
+from yaai.server.config import settings
 from yaai.server.database import get_db
 from yaai.server.models.auth import ModelAccess
 from yaai.server.rate_limit import limiter
@@ -61,7 +62,7 @@ async def get_config():
     return {
         "data": AuthConfigResponse(
             enabled=config.enabled,
-            local_enabled=config.local.enabled,
+            local_enabled=config.local_enabled,
             google_oauth_enabled=config.oauth.google.enabled,
             allow_registration=config.local.allow_registration,
         )
@@ -75,7 +76,7 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
     config = get_auth_config()
     if not config.enabled:
         raise HTTPException(status_code=400, detail="Authentication is not enabled")
-    if not config.local.enabled:
+    if not config.local_enabled:
         raise HTTPException(status_code=400, detail="Local authentication is not enabled")
 
     svc = _get_service(db, config)
@@ -134,7 +135,7 @@ async def google_login(request: Request):
     if oauth is None:
         raise HTTPException(status_code=500, detail="OAuth not configured")
 
-    redirect_uri = str(request.url_for("google_callback"))
+    redirect_uri = f"{settings.base_url}/api/v1/auth/oauth/google/callback"
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
@@ -172,7 +173,7 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     # Generate a short-lived auth code instead of passing tokens in the URL
     code = _secrets.token_urlsafe(32)
     _oauth_code_store[code] = tokens
-    frontend_url = f"/?auth_code={code}"
+    frontend_url = f"{settings.base_url}/?auth_code={code}"
     return RedirectResponse(url=frontend_url)
 
 

@@ -44,10 +44,14 @@ theme:
 
 nav:
   - Home: index.md
-  - Getting Started: getting-started.md
-  - Core Concepts: concepts.md
-  - Drift Detection Guide: drift-guide.md
-  - Architecture: architecture.md
+  - Guides:
+      - Getting Started: getting-started.md
+      - Server Setup: server-setup.md
+      - Deployment: deployment.md
+  - Learn:
+      - Core Concepts: concepts.md
+      - Drift Detection: drift-guide.md
+      - Architecture: architecture.md
   - Reference:
       - REST API: reference/api.md
       - Python SDK: reference/sdk.md
@@ -66,6 +70,7 @@ markdown_extensions:
 
 plugins:
   - search
+  - callouts
   - mkdocstrings:
       handlers:
         python:

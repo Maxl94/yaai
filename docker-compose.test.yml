@@ -22,12 +22,10 @@ services:
     ports:
       - "8001:8000"
     environment:
+      BASE_URL: "http://localhost:8001"
       DATABASE_URL: postgresql+asyncpg://aimon:testpass@db:5432/aimonitoring_test
-      DATABASE_URL_SYNC: postgresql://aimon:testpass@db:5432/aimonitoring_test
       AUTH_ENABLED: "true"
       AUTH_JWT_SECRET: "e2e-test-jwt-secret-32chars-long!"
-      AUTH_JWT_ALGORITHM: "HS256"
-      AUTH_LOCAL_ENABLED: "true"
       AUTH_LOCAL_ALLOW_REGISTRATION: "false"
       AUTH_SERVICE_ACCOUNTS_API_KEYS_ENABLED: "true"
       AUTH_OAUTH_GOOGLE_ENABLED: "false"

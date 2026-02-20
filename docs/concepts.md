@@ -34,8 +34,8 @@ From this, YAAI derives everything:
 
 You can define schemas manually or let YAAI infer them from a sample payload. Either way, the schema is the single configuration point. There is no other setup.
 
-!!! info "Schema locking"
-    You can freely edit a schema until the first drift detection job runs. After that, the schema is locked to protect historical results. To change the schema, create a new version.
+> [!NOTE]
+> **Schema locking** — You can freely edit a schema until the first drift detection job runs. After that, the schema is locked to protect historical results. To change the schema, create a new version.
 
 ## Inference data
 
@@ -116,11 +116,11 @@ The time range is adjustable. Tabs filter by input vs. output fields.
 
 YAAI supports four auth methods:
 
-- **Local accounts** -- username + password, enabled by default. An admin account is created on first startup. Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
+- **Local accounts** -- username + password, enabled by default. An admin account is created on first startup with a randomly generated password (check the server logs). Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
 - **Google OAuth** -- for human users via browser. Disabled by default. When enabled, local auth is automatically disabled.
 - **API keys** -- for service accounts and SDK clients (`X-API-Key: yaam_...`). Enabled by default. Keys are scoped per-model.
 - **Google service accounts** -- for GCP workloads using Application Default Credentials and ID token verification.
 
 Two roles exist: **owner** (full admin access) and **viewer** (read-only).
 
-Configure auth via environment variables (all prefixed with `AUTH_`). See `.env.example` for the full list.
+Configure auth via environment variables (all prefixed with `AUTH_`). See the [Server Setup guide](server-setup.md#6-authentication) for details.

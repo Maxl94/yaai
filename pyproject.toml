@@ -13,6 +13,8 @@ dependencies = [
 [project.optional-dependencies]
 gcp = [
     "google-auth>=2.0",
+    "cloud-sql-python-connector[asyncpg]>=1.0.0",
+    "pg8000>=1.30.0",
 ]
 server = [
     "alembic>=1.18.3",
@@ -109,7 +111,8 @@ convention = "google"
 "yaai/server/scheduler.py" = ["PLC0415"]
 "yaai/server/schemas/job.py" = ["PLC0415"]
 "yaai/server/auth/*" = ["S105", "S106", "PLW0603", "PLC0415", "PLR2004", "PLR0911"]
-"yaai/server/main.py" = ["S105", "S106"]
+"yaai/server/main.py" = ["S105", "S106", "PLC0415"]
+"yaai/server/database.py" = ["PLW0603"]
 "scripts/*" = ["PLR0915", "PLR2004", "C901"]
 
 [tool.pyscan.complexity]
@@ -143,5 +146,6 @@ dev = [
     "mkdocs-material>=9.6.0",
     "mkdocstrings[python]>=0.27.0",
     "mkdocs-render-swagger-plugin>=0.1.2",
+    "mkdocs-callouts>=1.14.0",
     "testcontainers[postgres]>=4.0.0",
 ]

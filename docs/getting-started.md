@@ -6,33 +6,11 @@ This walks you through the full flow: start the server, register a model, send d
 
 YAAI ships as two things: a lightweight **Python SDK** and a self-hosted **monitoring server**.
 
-### SDK only
-
-For sending inference data from your services:
-
 ```bash
-# pip
-pip install yaai-monitoring
-
-# uv
-uv add yaai-monitoring
+pip install yaai-monitoring              # SDK only (httpx + pydantic)
+pip install "yaai-monitoring[server]"    # Full server
+pip install "yaai-monitoring[server,gcp]" # Server + Google Cloud support
 ```
-
-This installs just `httpx` and `pydantic`. No heavy dependencies. If you authenticate with Google service accounts instead of API keys, install with `pip install yaai-monitoring[gcp]` to add `google-auth`.
-
-### Server (includes SDK)
-
-For running the full monitoring platform:
-
-```bash
-# pip
-pip install yaai-monitoring[server]
-
-# uv
-uv add yaai-monitoring[server]
-```
-
-This pulls in FastAPI, SQLAlchemy, scikit-learn, and friends. You'll also need PostgreSQL.
 
 ## Start the server
 
@@ -47,10 +25,13 @@ docker compose up -d
 
 This starts PostgreSQL and the YAAI server. Open [http://localhost:8000](http://localhost:8000) -- you should see the login screen.
 
-The `.env.example` ships with Google OAuth **disabled** and API key auth **enabled** -- that's all you need to get started. See `.env.example` for the full list of configuration options.
+Default login: `admin` / check the server logs for the generated password.
 
-!!! tip "Default credentials"
-    On first run, YAAI creates an admin account. Check your `.env` for the configured admin password (`AUTH_DEFAULT_ADMIN_PASSWORD`). With Google OAuth enabled, just sign in with an allowed email.
+> [!TIP]
+> For step-by-step server configuration, environment variables, and authentication setup, see:
+>
+> - **[Server Setup](server-setup.md)** -- local development with PostgreSQL, env vars, auth options
+> - **[Deployment](deployment.md)** -- production setup with Docker Compose, Google Cloud SQL
 
 ## Option A: Use the Python SDK
 

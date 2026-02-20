@@ -15,12 +15,12 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
 
+from yaai.server import database
 from yaai.server.auth.config import load_auth_config, validate_auth_config
-from yaai.server.auth.dependencies import set_auth_config
+from yaai.server.auth.dependencies import get_auth_config, set_auth_config
 from yaai.server.auth.oauth import setup_oauth
 from yaai.server.auth.passwords import hash_password
 from yaai.server.config import settings
-from yaai.server.database import async_session
 from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, User, UserRole
 from yaai.server.rate_limit import limiter
@@ -33,31 +33,41 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 _SERVER_DIR = Path(__file__).resolve().parent
 
 
-def _apply_migrations() -> None:
+def _apply_migrations(sync_creator=None) -> None:
     """Run Alembic migrations up to head.
 
     Called on startup to ensure the database schema is always up to date.
     Disable by setting AUTO_MIGRATE=false.
+
+    Args:
+        sync_creator: Optional sync callable for Cloud SQL Connector.
+                      When provided, creates a pg8000 engine with this creator.
     """
     alembic_cfg = AlembicConfig(str(_SERVER_DIR / "alembic.ini"))
-    alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url_sync)
-    command.upgrade(alembic_cfg, "head")
+    if sync_creator is not None:
+        from sqlalchemy import create_engine
+
+        sync_engine = create_engine("postgresql+pg8000://", creator=sync_creator)
+        with sync_engine.begin() as connection:
+            alembic_cfg.attributes["connection"] = connection
+            command.upgrade(alembic_cfg, "head")
+    else:
+        alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url_sync)
+        command.upgrade(alembic_cfg, "head")
 
 
-async def _bootstrap_admin(auth_config) -> None:
-    """Create a default admin user if the users table is empty."""
-    async with async_session() as db:
+async def _bootstrap_admin() -> None:
+    """Create a default admin user if the users table is empty.
+
+    Generates a random password and logs it once. The admin should change
+    it immediately after first login.
+    """
+    async with database.async_session() as db:
         result = await db.execute(select(User).limit(1))
         if result.scalars().first() is not None:
             return
 
-        password = auth_config.default_admin_password
-        if password in ("changeme", ""):
-            logger.warning(
-                "SECURITY WARNING: Creating admin account with default password. "
-                "Set AUTH_DEFAULT_ADMIN_PASSWORD to a strong value."
-            )
-
+        password = _secrets.token_urlsafe(16)
         admin = User(
             username="admin",
             hashed_password=hash_password(password),
@@ -66,37 +76,59 @@ async def _bootstrap_admin(auth_config) -> None:
         )
         db.add(admin)
         await db.commit()
-        logger.info("Created default admin account (username: admin).")
+        logger.info(
+            "Created default admin account — username: admin, password: %s  "
+            "(change this immediately after first login)",
+            password,
+        )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Load auth configuration
-    auth_config = load_auth_config()
-    auth_config = validate_auth_config(auth_config)
-    set_auth_config(auth_config)
+    cloud_sql = None
+
+    # Initialize Cloud SQL connector if configured
+    if settings.cloud_sql_instance:
+        from yaai.server.cloud_sql import CloudSQLConnector
+
+        cloud_sql = CloudSQLConnector()
+        await cloud_sql.startup()
+        database.init_engine(async_creator=cloud_sql.async_creator)
+
+    # Load auth configuration (skip if already pre-set, e.g. by tests)
+    from yaai.server.auth.dependencies import _auth_config as _existing
+
+    if _existing is None:
+        auth_config = load_auth_config()
+        auth_config = validate_auth_config(auth_config)
+        set_auth_config(auth_config)
+    else:
+        auth_config = _existing
 
     if auth_config.oauth.google.enabled:
         setup_oauth(auth_config)
 
     # Apply database migrations on startup (disable with AUTO_MIGRATE=false)
     if os.environ.get("AUTO_MIGRATE", "true").lower() in ("true", "1", "yes"):
-        _apply_migrations()
+        _apply_migrations(sync_creator=cloud_sql.sync_creator if cloud_sql else None)
     else:
         logger.info("AUTO_MIGRATE is disabled — skipping automatic migrations.")
 
-    # Create default admin account if no users exist
-    if auth_config.enabled:
-        await _bootstrap_admin(auth_config)
+    # Create default admin account if no users exist (local auth only)
+    if auth_config.enabled and auth_config.local_enabled:
+        await _bootstrap_admin()
 
     # Start job scheduler
-    async with async_session() as db:
+    async with database.async_session() as db:
         await load_active_jobs(db)
     scheduler.start()
 
     yield
 
     scheduler.shutdown(wait=False)
+
+    if cloud_sql:
+        await cloud_sql.shutdown()
 
 
 app = FastAPI(
@@ -110,12 +142,12 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS middleware
-_cors_origins = [
-    origin.strip()
-    for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
-    if origin.strip()
-]
+# CORS middleware — defaults to BASE_URL when CORS_ALLOWED_ORIGINS is not set
+_cors_env = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+if _cors_env.strip():
+    _cors_origins = [origin.strip() for origin in _cors_env.split(",") if origin.strip()]
+else:
+    _cors_origins = [settings.base_url]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -127,18 +159,11 @@ app.add_middleware(
 # Session middleware required for OAuth state (authlib uses it)
 _session_secret = os.environ.get("SESSION_SECRET", "")
 if not _session_secret or _session_secret == "dev-session-secret-change-me":
-    _is_prod = os.environ.get("ENVIRONMENT", "development").lower() in ("production", "prod")
-    if _is_prod:
-        raise RuntimeError(
-            "FATAL: SESSION_SECRET is not set or uses insecure default. Set SESSION_SECRET to a strong random value."
-        )
-    if not _session_secret:
-        _session_secret = _secrets.token_urlsafe(32)
-        logger.warning(
-            "SESSION_SECRET not configured — generated ephemeral secret. OAuth state will NOT survive restarts."
-        )
-    else:
-        logger.warning("SECURITY WARNING: Using insecure default SESSION_SECRET.")
+    _session_secret = _secrets.token_urlsafe(32)
+    logger.warning(
+        "SESSION_SECRET not configured — generated ephemeral secret. "
+        "OAuth state will NOT survive restarts. Set SESSION_SECRET for persistence."
+    )
 app.add_middleware(SessionMiddleware, secret_key=_session_secret)
 
 # Routers
