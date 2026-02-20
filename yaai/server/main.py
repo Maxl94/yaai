@@ -28,37 +28,39 @@ from yaai.server.routers import auth, dashboard, inferences, jobs, models, schem
 from yaai.server.scheduler import load_active_jobs, scheduler
 
 logging.basicConfig(
-    format="%(levelname)s - %(name)s - %(message)s",
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(levelname)s %(name)s: %(message)s",
 )
-
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 _SERVER_DIR = Path(__file__).resolve().parent
 
 
-def _apply_migrations(sync_creator=None) -> None:
+def _apply_migrations() -> None:
     """Run Alembic migrations up to head.
 
     Called on startup to ensure the database schema is always up to date.
     Disable by setting AUTO_MIGRATE=false.
 
-    Args:
-        sync_creator: Optional sync callable for Cloud SQL Connector.
-                      When provided, creates a pg8000 engine with this creator.
+    For Cloud SQL, uses a standalone sync Connector (via create_sync_engine)
+    so it never interferes with the async Connector's event loop.
     """
     alembic_cfg = AlembicConfig(str(_SERVER_DIR / "alembic.ini"))
-    if sync_creator is not None:
-        from sqlalchemy import create_engine
+    try:
+        if settings.cloud_sql_instance:
+            from yaai.server.cloud_sql import CloudSQLConnector
 
-        sync_engine = create_engine("postgresql+pg8000://", creator=sync_creator)
-        with sync_engine.begin() as connection:
-            alembic_cfg.attributes["connection"] = connection
+            engine = CloudSQLConnector.create_sync_engine()
+            with engine.begin() as connection:
+                alembic_cfg.attributes["connection"] = connection
+                command.upgrade(alembic_cfg, "head")
+        else:
+            alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url_sync)
             command.upgrade(alembic_cfg, "head")
-    else:
-        alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url_sync)
-        command.upgrade(alembic_cfg, "head")
+    except BaseException:
+        logger.exception("Failed to apply database migrations")
+        raise
 
 
 async def _bootstrap_admin() -> None:
@@ -92,59 +94,59 @@ async def _bootstrap_admin() -> None:
 async def lifespan(app: FastAPI):
     cloud_sql = None
 
-    # Initialize Cloud SQL connector if configured
+    # Apply database migrations on startup (disable with AUTO_MIGRATE=false)
+    if os.environ.get("AUTO_MIGRATE", "true").lower() in ("true", "1", "yes"):
+        logger.info("Applying database migrations...")
+        _apply_migrations()
+        logger.info("Database migrations applied successfully.")
+    else:
+        logger.info("AUTO_MIGRATE is disabled — skipping automatic migrations.")
+
+    # Initialize Cloud SQL async connector
     if settings.cloud_sql_instance:
-        logger.info("Starting Cloud SQL Connector for instance: %s", settings.cloud_sql_instance)
         from yaai.server.cloud_sql import CloudSQLConnector
 
         cloud_sql = CloudSQLConnector()
         await cloud_sql.startup()
         database.init_engine(async_creator=cloud_sql.async_creator)
+        logger.info("Cloud SQL connector ready.")
+    else:
+        logger.info("Using DATABASE_URL (no Cloud SQL connector).")
 
     # Load auth configuration (skip if already pre-set, e.g. by tests)
     from yaai.server.auth.dependencies import _auth_config as _existing
 
     if _existing is None:
-        logger.info("Loading authentication configuration...")
         auth_config = load_auth_config()
         auth_config = validate_auth_config(auth_config)
         set_auth_config(auth_config)
     else:
         auth_config = _existing
+    logger.info(
+        "Auth config loaded (enabled=%s, oauth_google=%s).", auth_config.enabled, auth_config.oauth.google.enabled
+    )
 
     if auth_config.oauth.google.enabled:
-        logger.info("Setting up Google OAuth...")
         setup_oauth(auth_config)
-
-    # Apply database migrations on startup (disable with AUTO_MIGRATE=false)
-    if os.environ.get("AUTO_MIGRATE", "true").lower() in ("true", "1", "yes"):
-        logger.info("Applying database migrations...")
-        _apply_migrations(sync_creator=cloud_sql.sync_creator if cloud_sql else None)
-        logger.info("Database migrations applied successfully.")
-    else:
-        logger.info("AUTO_MIGRATE is disabled — skipping automatic migrations.")
+        logger.info("Google OAuth configured.")
 
     # Create default admin account if no users exist (local auth only)
     if auth_config.enabled and auth_config.local_enabled:
-        logger.info("Bootstrapping admin user...")
         await _bootstrap_admin()
 
     # Start job scheduler
+    logger.info("Loading active jobs ...")
     async with database.async_session() as db:
-        logger.info("Loading active jobs into scheduler...")
         await load_active_jobs(db)
     scheduler.start()
-
     logger.info("Startup complete.")
 
     yield
 
-    logger.info("Shutting down...")
     scheduler.shutdown(wait=False)
 
     if cloud_sql:
         await cloud_sql.shutdown()
-    logger.info("Shutdown complete.")
 
 
 app = FastAPI(
