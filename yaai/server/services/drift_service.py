@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.schemas.model import FieldDirection
+from yaai.server.config import settings
 from yaai.server.drift.registry import get_metric
 from yaai.server.models.inference import InferenceData
 from yaai.server.models.job import (
@@ -77,13 +78,21 @@ class DriftService(BaseService):
         configured_window: timedelta,
         min_samples: int,
     ) -> tuple[list[InferenceData], timedelta]:
-        """Load inferences, auto-extending the window backward until min_samples is met."""
+        """Load a random sample of inferences, auto-extending the window until min_samples is met.
+
+        At most ``settings.drift_max_samples`` records are loaded per attempt.
+        When the window contains fewer records than that limit all are returned,
+        which preserves the existing auto-extension behaviour unchanged.
+        """
+        max_samples = settings.drift_max_samples
         actual_window = configured_window
-        inference_data = await self.load_inferences(model_version_id, to_ts - actual_window, to_ts)
+        inference_data = await self.load_inferences_sampled(model_version_id, to_ts - actual_window, to_ts, max_samples)
 
         while len(inference_data) < min_samples and actual_window < self.MAX_WINDOW:
             actual_window = min(actual_window * 2, self.MAX_WINDOW)
-            inference_data = await self.load_inferences(model_version_id, to_ts - actual_window, to_ts)
+            inference_data = await self.load_inferences_sampled(
+                model_version_id, to_ts - actual_window, to_ts, max_samples
+            )
 
         return inference_data, actual_window
 
@@ -118,7 +127,9 @@ class DriftService(BaseService):
             ValueError: If no reference or inference data is available.
         """
         if job_config.comparison_type == ComparisonType.VS_REFERENCE:
-            reference_data = await self.load_reference_data(job_config.model_version_id)
+            reference_data = await self.load_reference_data_sampled(
+                job_config.model_version_id, settings.drift_max_samples
+            )
             if not reference_data:
                 msg = "No reference data available for this model version"
                 raise ValueError(msg)
@@ -135,10 +146,11 @@ class DriftService(BaseService):
                 window,
                 min_samples,
             )
-            reference_data = await self._load_inferences_as_dicts(
+            reference_data = await self.load_inferences_sampled(
                 job_config.model_version_id,
                 period_end - actual_window * 2,
                 period_end - actual_window,
+                settings.drift_max_samples,
             )
             if not reference_data:
                 msg = "No data available for the previous time window"
@@ -534,12 +546,3 @@ class DriftService(BaseService):
         if not config:
             raise HTTPException(status_code=404, detail="Job not found")
         return config
-
-    async def _load_inferences_as_dicts(
-        self,
-        model_version_id: uuid.UUID,
-        from_ts: datetime,
-        to_ts: datetime,
-    ) -> list[InferenceData]:
-        """Load inferences for the previous window (used as 'reference' in rolling_window mode)."""
-        return await self.load_inferences(model_version_id, from_ts, to_ts)

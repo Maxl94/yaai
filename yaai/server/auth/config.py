@@ -7,6 +7,8 @@ import secrets as _secrets
 from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from yaai.server.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -164,8 +166,6 @@ def validate_auth_config(config: AuthConfig) -> AuthConfig:
 
     # --- Google SA: default audience to BASE_URL ---
     if config.service_accounts.google.enabled and not config.service_accounts.google.audience:
-        from yaai.server.config import settings
-
         config.service_accounts.google.audience = settings.base_url
         logger.info(
             "AUTH_SERVICE_ACCOUNTS_GOOGLE_AUDIENCE not set — defaulting to BASE_URL (%s)",

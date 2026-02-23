@@ -48,13 +48,15 @@ def mock_settings():
 
 @pytest.fixture
 def mock_connector_instance():
-    """Mock the Connector instance returned by Connector()."""
+    """Mock the Connector instance returned by create_async_connector()."""
     instance = MagicMock()
     instance.connect_async = AsyncMock(return_value=MagicMock(name="async_conn"))
     instance.connect = MagicMock(return_value=MagicMock(name="sync_conn"))
-    instance.close = MagicMock()
+    instance.close_async = AsyncMock()
     _mock_connector_module.Connector.return_value = instance
-    yield instance
+    # create_async_connector is imported by name in cloud_sql.py, so patch it there directly
+    with patch("yaai.server.cloud_sql.create_async_connector", AsyncMock(return_value=instance)):
+        yield instance
 
 
 class TestCloudSQLConnector:
@@ -62,7 +64,7 @@ class TestCloudSQLConnector:
         connector = CloudSQLConnector()
         await connector.startup()
 
-        _mock_connector_module.Connector.assert_called_with(refresh_strategy="LAZY")
+        # create_async_connector was awaited and its return value stored
         assert connector._connector is mock_connector_instance
 
     async def test_shutdown_closes_connector(self, mock_settings, mock_connector_instance):
@@ -70,7 +72,7 @@ class TestCloudSQLConnector:
         await connector.startup()
         await connector.shutdown()
 
-        mock_connector_instance.close.assert_called_once()
+        mock_connector_instance.close_async.assert_called_once()
 
     async def test_shutdown_without_startup_is_safe(self, mock_settings, mock_connector_instance):
         connector = CloudSQLConnector()
@@ -91,20 +93,23 @@ class TestCloudSQLConnector:
         )
         assert result == mock_connector_instance.connect_async.return_value
 
-    async def test_sync_creator_calls_connect(self, mock_settings, mock_connector_instance):
-        connector = CloudSQLConnector()
-        await connector.startup()
-        result = connector.sync_creator()
+    def test_create_sync_engine_connects_via_pg8000(self, mock_settings, mock_connector_instance):
+        """create_sync_engine() builds a standalone sync engine using pg8000."""
+        mock_sync_conn = MagicMock(name="sync_conn")
+        mock_sync_connector = MagicMock()
+        mock_sync_connector.connect.return_value = mock_sync_conn
+        _mock_connector_module.Connector.return_value = mock_sync_connector
 
-        mock_connector_instance.connect.assert_called_once_with(
-            "my-project:us-central1:my-instance",
-            "pg8000",
-            user="sa@my-project.iam.gserviceaccount.com",
-            db="testdb",
-            enable_iam_auth=True,
-            ip_type=_MockIPTypes.PUBLIC,
-        )
-        assert result == mock_connector_instance.connect.return_value
+        with patch("yaai.server.cloud_sql.create_engine") as mock_create_engine:
+            mock_engine = MagicMock()
+            mock_create_engine.return_value = mock_engine
+
+            result = CloudSQLConnector.create_sync_engine()
+
+            mock_create_engine.assert_called_once()
+            call_args = mock_create_engine.call_args
+            assert call_args.args[0] == "postgresql+pg8000://"
+            assert result is mock_engine
 
     async def test_ip_type_private(self, mock_settings, mock_connector_instance):
         mock_settings.cloud_sql_ip_type = "private"
@@ -193,19 +198,22 @@ class TestApplyMigrations:
         with (
             patch.object(main_mod, "AlembicConfig") as mock_cfg_cls,
             patch.object(main_mod, "command") as mock_command,
+            patch.object(main_mod, "settings") as mock_s,
         ):
+            mock_s.cloud_sql_instance = None
+            mock_s.database_url_sync = "sqlite:///test.db"
             mock_cfg = MagicMock()
             mock_cfg_cls.return_value = mock_cfg
 
-            main_mod._apply_migrations(sync_creator=None)
+            main_mod._apply_migrations()
 
             mock_cfg.set_main_option.assert_called_once()
             mock_command.upgrade.assert_called_once_with(mock_cfg, "head")
 
-    def test_apply_migrations_with_sync_creator(self):
+    def test_apply_migrations_with_cloud_sql(self):
         import yaai.server.main as main_mod
+        from yaai.server.cloud_sql import CloudSQLConnector
 
-        mock_creator = MagicMock(return_value=MagicMock())
         mock_connection = MagicMock()
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_connection)
@@ -214,15 +222,16 @@ class TestApplyMigrations:
         with (
             patch.object(main_mod, "AlembicConfig") as mock_cfg_cls,
             patch.object(main_mod, "command") as mock_command,
-            patch("sqlalchemy.create_engine", return_value=mock_engine) as mock_create,
+            patch.object(main_mod, "settings") as mock_s,
+            patch.object(CloudSQLConnector, "create_sync_engine", return_value=mock_engine),
         ):
+            mock_s.cloud_sql_instance = "my-project:us-central1:my-instance"
             mock_cfg = MagicMock()
             mock_cfg.attributes = {}
             mock_cfg_cls.return_value = mock_cfg
 
-            main_mod._apply_migrations(sync_creator=mock_creator)
+            main_mod._apply_migrations()
 
-            mock_create.assert_called_once_with("postgresql+pg8000://", creator=mock_creator)
             assert mock_cfg.attributes["connection"] is mock_connection
             mock_command.upgrade.assert_called_once_with(mock_cfg, "head")
             mock_cfg.set_main_option.assert_not_called()

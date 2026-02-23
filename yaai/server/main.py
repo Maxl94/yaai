@@ -49,7 +49,7 @@ def _apply_migrations() -> None:
     alembic_cfg = AlembicConfig(str(_SERVER_DIR / "alembic.ini"))
     try:
         if settings.cloud_sql_instance:
-            from yaai.server.cloud_sql import CloudSQLConnector
+            from yaai.server.cloud_sql import CloudSQLConnector  # noqa: PLC0415
 
             engine = CloudSQLConnector.create_sync_engine()
             with engine.begin() as connection:
@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize Cloud SQL async connector
     if settings.cloud_sql_instance:
-        from yaai.server.cloud_sql import CloudSQLConnector
+        from yaai.server.cloud_sql import CloudSQLConnector  # noqa: PLC0415
 
         cloud_sql = CloudSQLConnector()
         await cloud_sql.startup()
@@ -114,7 +114,7 @@ async def lifespan(app: FastAPI):
         logger.info("Using DATABASE_URL (no Cloud SQL connector).")
 
     # Load auth configuration (skip if already pre-set, e.g. by tests)
-    from yaai.server.auth.dependencies import _auth_config as _existing
+    from yaai.server.auth.dependencies import _auth_config as _existing  # noqa: PLC0415
 
     if _existing is None:
         auth_config = load_auth_config()
@@ -175,8 +175,8 @@ app.add_middleware(
 )
 
 # Session middleware required for OAuth state (authlib uses it)
-_session_secret = os.environ.get("SESSION_SECRET", "")
-if not _session_secret or _session_secret == "dev-session-secret-change-me":
+_session_secret = os.environ.get("SESSION_SECRET")
+if not _session_secret or _session_secret == "dev-session-secret-change-me":  # noqa: S105
     _session_secret = _secrets.token_urlsafe(32)
     logger.warning(
         "SESSION_SECRET not configured — generated ephemeral secret. "

@@ -46,7 +46,7 @@ class JobConfigUpdate(BaseModel):
         """Validate that the schedule is a valid cron expression, if provided."""
         if v is None:
             return v
-        from apscheduler.triggers.cron import CronTrigger
+        from apscheduler.triggers.cron import CronTrigger  # noqa: PLC0415
 
         try:
             CronTrigger.from_crontab(v)

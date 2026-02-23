@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.server.auth.config import AuthConfig
-from yaai.server.models.auth import APIKey, ServiceAccount
+from yaai.server.models.auth import APIKey, AuthProvider, ServiceAccount, User, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -110,11 +110,8 @@ async def validate_google_sa_token(config: AuthConfig, token: str, db: AsyncSess
         return None
 
     email = claims.get("email")
-    if not email:
-        return None
-
-    # Validate email is in allowed list
-    if config.service_accounts.google.allowed_emails and email not in config.service_accounts.google.allowed_emails:
+    allowed = config.service_accounts.google.allowed_emails
+    if not email or (allowed and email not in allowed):
         return None
 
     # Look up the service account in the database by email
@@ -130,4 +127,84 @@ async def validate_google_sa_token(config: AuthConfig, token: str, db: AsyncSess
         "service_account_id": str(sa.id),
     }
     _token_cache[cache_key] = result
+    return result
+
+
+# Cache for user ID token validations (5 min TTL)
+_user_token_cache: TTLCache = TTLCache(maxsize=256, ttl=300)
+
+
+async def validate_google_user_token(config: AuthConfig, token: str, db: AsyncSession) -> dict | None:
+    """Validate a Google ID token and match against the User table.
+
+    This allows users who authenticated via Google OAuth to also use
+    the SDK/CLI with ``gcloud auth print-identity-token``.  The token
+    is cryptographically verified the same way as SA tokens, but the
+    email is looked up in the *users* table instead of *service_accounts*.
+    """
+    if not config.oauth.google.enabled:
+        return None
+
+    cache_key = _token_cache_key(token)
+    cached = _user_token_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # User ID tokens from `gcloud auth print-identity-token` have Google's
+    # own OAuth client ID as audience (not the server URL), so we must
+    # skip audience validation.  Security comes from the email being in
+    # the User table + the token being cryptographically signed by Google.
+    loop = asyncio.get_running_loop()
+    try:
+        claims = await loop.run_in_executor(
+            None,
+            google_id_token.verify_oauth2_token,
+            token,
+            _google_auth_request,
+            None,  # no audience check for user tokens
+        )
+    except ValueError as exc:
+        logger.debug("Google user ID token verification failed: %s", exc)
+        return None
+
+    email = claims.get("email")
+    role = config.oauth.google.resolve_role(email) if email else None
+    if not role:
+        if email:
+            logger.debug("Google user ID token email %s not authorized", email)
+        return None
+
+    # Look up user by email
+    stmt = select(User).where(User.email == email, User.is_active.is_(True))
+    user_result = await db.execute(stmt)
+    user = user_result.scalar_one_or_none()
+
+    # Auto-create user if enabled (mirrors browser OAuth auto_create_users)
+    if user is None and config.oauth.google.auto_create_users:
+        google_sub = claims.get("sub", "")
+        username = claims.get("name") or email.split("@", maxsplit=1)[0]
+        user = User(
+            username=username,
+            email=email,
+            role=UserRole(role),
+            auth_provider=AuthProvider.GOOGLE,
+            google_sub=google_sub,
+            is_active=True,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        logger.info("Auto-created user %s (%s) via Google ID token", username, email)
+
+    if user is None:
+        logger.debug("No active user found for email %s (auto_create disabled)", email)
+        return None
+
+    result = {
+        "identity_type": "google_user",
+        "user_id": str(user.id),
+        "email": email,
+        "role": str(user.role),
+    }
+    _user_token_cache[cache_key] = result
     return result

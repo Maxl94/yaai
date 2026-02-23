@@ -6,6 +6,7 @@ from datetime import datetime
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yaai.server.config import settings
 from yaai.server.drift.registry import get_metric
 from yaai.server.models.model import SchemaField
 from yaai.server.schemas.dashboard import (
@@ -29,6 +30,8 @@ class ComparisonPanel:
         data_a: HistogramData | CategoricalData,
         data_b: HistogramData | CategoricalData,
         drift_score: dict | None = None,
+        sample_info_a: dict | None = None,
+        sample_info_b: dict | None = None,
     ):
         self.field_name = field_name
         self.direction = direction
@@ -37,6 +40,8 @@ class ComparisonPanel:
         self.data_a = data_a
         self.data_b = data_b
         self.drift_score = drift_score
+        self.sample_info_a = sample_info_a
+        self.sample_info_b = sample_info_b
 
     def to_dict(self) -> dict:
         result = {
@@ -49,6 +54,10 @@ class ComparisonPanel:
         }
         if self.drift_score:
             result["drift_score"] = self.drift_score
+        if self.sample_info_a:
+            result["sample_info_a"] = self.sample_info_a
+        if self.sample_info_b:
+            result["sample_info_b"] = self.sample_info_b
         return result
 
 
@@ -73,6 +82,14 @@ class ComparisonService(BaseService):
             "threshold": threshold or metric.default_threshold,
         }
 
+    @staticmethod
+    def _make_sample_info(sample_size: int, total_count: int) -> dict:
+        return {
+            "sample_size": sample_size,
+            "total_count": total_count,
+            "is_sampled": total_count > sample_size,
+        }
+
     async def compare_time_windows(
         self,
         model_version_id: uuid.UUID,
@@ -83,10 +100,19 @@ class ComparisonService(BaseService):
     ) -> list[dict]:
         """Compare distributions between two arbitrary time windows."""
         version = await self.get_version_with_schema(model_version_id)
-        inferences_a = await self.load_inferences(model_version_id, from_a, to_a)
-        inferences_b = await self.load_inferences(model_version_id, from_b, to_b)
+        max_s = settings.drift_max_samples
+        inferences_a = await self.load_inferences_sampled(model_version_id, from_a, to_a, max_s)
+        inferences_b = await self.load_inferences_sampled(model_version_id, from_b, to_b, max_s)
+        total_a = await self.count_inferences(model_version_id, from_a, to_a)
+        total_b = await self.count_inferences(model_version_id, from_b, to_b)
 
-        return self._build_comparison_panels(version.schema_fields, inferences_a, inferences_b)
+        return self._build_comparison_panels(
+            version.schema_fields,
+            inferences_a,
+            inferences_b,
+            total_count_a=total_a,
+            total_count_b=total_b,
+        )
 
     async def compare_vs_reference(
         self,
@@ -96,18 +122,32 @@ class ComparisonService(BaseService):
     ) -> list[dict]:
         """Compare a time window's distributions against stored reference data."""
         version = await self.get_version_with_schema(model_version_id)
-        inferences = await self.load_inferences(model_version_id, from_ts, to_ts)
-        reference = await self.load_reference_data(model_version_id)
+        max_s = settings.drift_max_samples
+        inferences = await self.load_inferences_sampled(model_version_id, from_ts, to_ts, max_s)
+        reference = await self.load_reference_data_sampled(model_version_id, max_s)
+        total_inferences = await self.count_inferences(model_version_id, from_ts, to_ts)
+        total_reference = await self.count_reference_data(model_version_id)
 
-        return self._build_comparison_panels(version.schema_fields, inferences, reference)
+        return self._build_comparison_panels(
+            version.schema_fields,
+            inferences,
+            reference,
+            total_count_a=total_inferences,
+            total_count_b=total_reference,
+        )
 
     def _build_comparison_panels(
         self,
         fields: list[SchemaField],
         data_a: list,
         data_b: list,
+        *,
+        total_count_a: int,
+        total_count_b: int,
     ) -> list[dict]:
         sorted_fields = self.sort_schema_fields(fields)
+        sample_info_a = self._make_sample_info(len(data_a), total_count_a)
+        sample_info_b = self._make_sample_info(len(data_b), total_count_b)
 
         panels = []
         for field in sorted_fields:
@@ -118,6 +158,9 @@ class ComparisonService(BaseService):
                 panel = self._build_numerical_comparison(field, values_a, values_b)
             else:
                 panel = self._build_categorical_comparison(field, values_a, values_b)
+
+            panel.sample_info_a = sample_info_a
+            panel.sample_info_b = sample_info_b
             panels.append(panel.to_dict())
 
         return panels

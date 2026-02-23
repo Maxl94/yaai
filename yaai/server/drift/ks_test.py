@@ -4,6 +4,8 @@ from scipy import stats
 
 from yaai.server.drift.base import DriftOutput, NumericalDriftMetric, NumericalPreprocessed
 
+_MIN_SAMPLES = 2  # KS test requires at least 2 samples per distribution
+
 
 class KSTest(NumericalDriftMetric):
     """Kolmogorov-Smirnov test for numerical feature drift.
@@ -18,7 +20,7 @@ class KSTest(NumericalDriftMetric):
     def _compute_numerical(self, data: NumericalPreprocessed, threshold: float) -> DriftOutput:
         """Compute KS test from preprocessed numerical data."""
         # KS test requires at least 2 samples in each distribution
-        if data.ref_count < 2 or data.act_count < 2:
+        if data.ref_count < _MIN_SAMPLES or data.act_count < _MIN_SAMPLES:
             return DriftOutput(
                 metric_name=self.name,
                 metric_value=0.0,

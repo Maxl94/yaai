@@ -55,6 +55,7 @@ nav:
   - Reference:
       - REST API: reference/api.md
       - Python SDK: reference/sdk.md
+      - Configuration: configuration.md
 
 markdown_extensions:
   - admonition
