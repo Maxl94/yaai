@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/Maxl94/yaai/compare/v0.2.3...v0.3.0) (2026-02-23)
+
+
+### Features
+
+* add Google user ID token auth and scale dashboard to 1.8M+ records ([9d006be](https://github.com/Maxl94/yaai/commit/9d006be871b25b22c84f2981b56e4bf437a9e496))
+
 ## [0.2.3](https://github.com/Maxl94/yaai/compare/v0.2.2...v0.2.3) (2026-02-20)
 
 
