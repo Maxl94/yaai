@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+_MIN_CATEGORIES = 2  # chi-squared test requires at least 2 distinct categories
+
 
 @dataclass
 class DriftOutput:
@@ -111,7 +113,7 @@ class CategoricalDriftMetric(DriftMetric):
 
         all_categories = sorted(set(ref_counts.keys()) | set(act_counts.keys()))
 
-        if len(all_categories) < 2:
+        if len(all_categories) < _MIN_CATEGORIES:
             return None
 
         ref_freq = np.array([ref_counts.get(c, 0) for c in all_categories], dtype=float)

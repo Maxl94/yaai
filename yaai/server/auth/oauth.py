@@ -9,7 +9,7 @@ _oauth: OAuth | None = None
 
 def setup_oauth(config: AuthConfig) -> OAuth | None:
     """Initialize the OAuth client with Google provider if enabled."""
-    global _oauth
+    global _oauth  # noqa: PLW0603
 
     if not config.oauth.google.enabled:
         return None

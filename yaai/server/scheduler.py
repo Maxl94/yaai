@@ -16,10 +16,10 @@ scheduler = AsyncIOScheduler()
 
 async def _execute_scheduled_job(job_config_id: str) -> None:
     """Called by APScheduler when a cron trigger fires."""
-    import uuid
+    import uuid  # noqa: PLC0415
 
-    from yaai.server import database
-    from yaai.server.services.drift_service import DriftService
+    from yaai.server import database  # noqa: PLC0415
+    from yaai.server.services.drift_service import DriftService  # noqa: PLC0415
 
     async with database.async_session() as db:
         svc = DriftService(db)

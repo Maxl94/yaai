@@ -5,6 +5,7 @@ import numpy as np
 from yaai.server.drift.base import DriftOutput, NumericalDriftMetric, NumericalPreprocessed
 
 EPSILON = 1e-4
+_MIN_BOUNDARIES = 2  # PSI requires at least 2 unique bucket boundaries
 
 
 class PSI(NumericalDriftMetric):
@@ -27,7 +28,7 @@ class PSI(NumericalDriftMetric):
         # Ensure unique boundaries
         bucket_boundaries = np.unique(bucket_boundaries)
 
-        if len(bucket_boundaries) < 2:
+        if len(bucket_boundaries) < _MIN_BOUNDARIES:
             return DriftOutput(
                 metric_name=self.name,
                 metric_value=0.0,

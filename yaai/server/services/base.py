@@ -7,6 +7,7 @@ from statistics import median
 
 import numpy as np
 from fastapi import HTTPException
+from sqlalchemy import func as sql_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -86,6 +87,85 @@ class BaseService:
             List of ReferenceData records.
         """
         result = await self.db.execute(select(ReferenceData).where(ReferenceData.model_version_id == model_version_id))
+        return list(result.scalars().all())
+
+    async def load_inferences_sampled(
+        self,
+        model_version_id: uuid.UUID,
+        from_ts: datetime,
+        to_ts: datetime,
+        max_samples: int,
+    ) -> list[InferenceData]:
+        """Load a random sample of at most *max_samples* inference records.
+
+        Uses ``ORDER BY random()`` so the sample is unbiased.  When the window
+        contains fewer records than *max_samples* all records are returned.
+
+        Args:
+            model_version_id: The model version to query.
+            from_ts: Start of time range (inclusive).
+            to_ts: End of time range (inclusive).
+            max_samples: Upper bound on the number of records returned.
+
+        Returns:
+            List of InferenceData in random order.
+        """
+        query = (
+            select(InferenceData)
+            .where(
+                InferenceData.model_version_id == model_version_id,
+                InferenceData.timestamp >= from_ts,
+                InferenceData.timestamp <= to_ts,
+            )
+            .order_by(sql_func.random())
+            .limit(max_samples)
+        )
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def count_inferences(
+        self,
+        model_version_id: uuid.UUID,
+        from_ts: datetime,
+        to_ts: datetime,
+    ) -> int:
+        """Return the exact count of inference records in a time window."""
+        result = await self.db.execute(
+            select(sql_func.count()).where(
+                InferenceData.model_version_id == model_version_id,
+                InferenceData.timestamp >= from_ts,
+                InferenceData.timestamp <= to_ts,
+            )
+        )
+        return result.scalar_one()
+
+    async def count_reference_data(self, model_version_id: uuid.UUID) -> int:
+        """Return the exact count of reference records for a model version."""
+        result = await self.db.execute(
+            select(sql_func.count()).where(ReferenceData.model_version_id == model_version_id)
+        )
+        return result.scalar_one()
+
+    async def load_reference_data_sampled(
+        self,
+        model_version_id: uuid.UUID,
+        max_samples: int,
+    ) -> list[ReferenceData]:
+        """Load a random sample of at most *max_samples* reference records.
+
+        Args:
+            model_version_id: The model version to query.
+            max_samples: Upper bound on the number of records returned.
+
+        Returns:
+            List of ReferenceData in random order.
+        """
+        result = await self.db.execute(
+            select(ReferenceData)
+            .where(ReferenceData.model_version_id == model_version_id)
+            .order_by(sql_func.random())
+            .limit(max_samples)
+        )
         return list(result.scalars().all())
 
     @staticmethod

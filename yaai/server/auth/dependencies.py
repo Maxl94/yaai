@@ -11,16 +11,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.server.auth.config import AuthConfig
-from yaai.server.auth.service_auth import validate_api_key, validate_google_sa_token
+from yaai.server.auth.jwt import decode_token
+from yaai.server.auth.service_auth import validate_api_key, validate_google_sa_token, validate_google_user_token
 from yaai.server.database import get_db
 from yaai.server.models.auth import ModelAccess, UserRole
+from yaai.server.models.job import JobConfig
+from yaai.server.models.model import ModelVersion
 
 # Global auth config reference, set at startup
 _auth_config: AuthConfig | None = None
 
 
 def set_auth_config(config: AuthConfig) -> None:
-    global _auth_config
+    global _auth_config  # noqa: PLW0603
     _auth_config = config
 
 
@@ -63,8 +66,6 @@ class CurrentIdentity:
 async def _try_jwt(config: AuthConfig, token: str) -> CurrentIdentity | None:
     """Try to decode a JWT access token."""
     try:
-        from yaai.server.auth.jwt import decode_token
-
         payload = decode_token(config, token)
         if payload.get("type") != "access":
             return None
@@ -109,6 +110,19 @@ async def _try_google_sa(config: AuthConfig, token: str, db: AsyncSession) -> Cu
     )
 
 
+async def _try_google_user(config: AuthConfig, token: str, db: AsyncSession) -> CurrentIdentity | None:
+    """Try to validate a Google user ID token (from gcloud CLI or SDK)."""
+    result = await validate_google_user_token(config, token, db)
+    if result is None:
+        return None
+    return CurrentIdentity(
+        user_id=result["user_id"],
+        role=UserRole(result["role"]),
+        identity_type="user",
+        username=result.get("email"),
+    )
+
+
 async def get_current_identity(
     credentials: HTTPAuthorizationCredentials | None = Depends(optional_bearer),
     x_api_key: str | None = Header(None, alias="X-API-Key"),
@@ -139,6 +153,11 @@ async def get_current_identity(
 
         # 3. Try Google SA token
         identity = await _try_google_sa(config, token, db)
+        if identity:
+            return identity
+
+        # 4. Try Google user ID token (gcloud auth print-identity-token)
+        identity = await _try_google_user(config, token, db)
         if identity:
             return identity
 
@@ -248,8 +267,6 @@ async def check_model_write_access(
 
 async def resolve_model_id_from_version(model_version_id: uuid.UUID, db: AsyncSession) -> uuid.UUID:
     """Look up the model_id for a given model_version_id."""
-    from yaai.server.models.model import ModelVersion
-
     stmt = select(ModelVersion.model_id).where(ModelVersion.id == model_version_id)
     result = await db.execute(stmt)
     model_id = result.scalar_one_or_none()
@@ -260,9 +277,6 @@ async def resolve_model_id_from_version(model_version_id: uuid.UUID, db: AsyncSe
 
 async def resolve_model_id_from_job(job_id: uuid.UUID, db: AsyncSession) -> uuid.UUID:
     """Look up the model_id for a given job_id (job → version → model)."""
-    from yaai.server.models.job import JobConfig
-    from yaai.server.models.model import ModelVersion
-
     stmt = (
         select(ModelVersion.model_id)
         .join(JobConfig, JobConfig.model_version_id == ModelVersion.id)

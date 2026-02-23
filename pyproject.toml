@@ -105,15 +105,14 @@ known-first-party = ["yaai"]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
+# HTTP status codes in tests are self-documenting; PLC0415 for mock/patch imports inside test fns
 "tests/*" = ["S101", "S108", "PLR2004", "PLC0415"]
-"yaai/client.py" = ["PLR2004"]
-"yaai/server/drift/*" = ["PLR2004"]
-"yaai/server/scheduler.py" = ["PLC0415"]
-"yaai/server/schemas/job.py" = ["PLC0415"]
-"yaai/server/auth/*" = ["S105", "S106", "PLW0603", "PLC0415", "PLR2004", "PLR0911"]
-"yaai/server/main.py" = ["S105", "S106", "PLC0415"]
-"yaai/server/database.py" = ["PLW0603"]
-"scripts/*" = ["PLR0915", "PLR2004", "C901"]
+# Procedural demo/seed scripts with inherently large functions
+"scripts/*" = ["PLR0915", "PLR2004", "C901", "PLR0912"]
+# S608: false positive — {col} is always "inputs"/"outputs", {where} uses only bind params.
+# Inline suppression is not possible: ruff anchors the violation to the f-string opening line,
+# which is inside the triple-quoted string and cannot carry a Python comment.
+"yaai/server/services/dashboard_service.py" = ["S608"]
 
 [tool.pyscan.complexity]
 max_complexity = 15

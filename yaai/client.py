@@ -92,13 +92,22 @@ class YaaiClient:
         credentials, _ = google.auth.default()
 
         if target_audience and hasattr(credentials, "with_target_audience"):
-            # Service account credentials support ID tokens
+            # Service account credentials — native ID token support
             self._credentials = credentials.with_target_audience(target_audience)
+            self._credentials.refresh(self._google_request)
+            token = self._credentials.token
         else:
+            # User credentials (from `gcloud auth application-default login`).
+            # Refresh to get an ID token — ADC includes openid scope by default,
+            # so the token response contains an id_token with the user's email.
             self._credentials = credentials
+            self._credentials.refresh(self._google_request)
+            token = self._credentials.id_token
+            if not token:
+                msg = "Could not obtain an ID token from user credentials. Run: gcloud auth application-default login"
+                raise RuntimeError(msg)
 
-        self._credentials.refresh(self._google_request)
-        return {"Authorization": f"Bearer {self._credentials.token}"}
+        return {"Authorization": f"Bearer {token}"}
 
     def _refresh_google_credentials(self) -> None:
         """Refresh Google credentials if expired. No-op for API key auth."""
@@ -106,7 +115,9 @@ class YaaiClient:
             return
         if not self._credentials.valid:
             self._credentials.refresh(self._google_request)
-            self._client.headers["Authorization"] = f"Bearer {self._credentials.token}"
+            # Use id_token for user creds, .token for SA creds
+            token = self._credentials.id_token or self._credentials.token
+            self._client.headers["Authorization"] = f"Bearer {token}"
 
     async def _request(self, method: str, url: str, **kwargs: object) -> httpx.Response:
         """Send a request with automatic credential refresh."""
@@ -125,7 +136,7 @@ class YaaiClient:
         await self._client.aclose()
 
     def _raise_for_status(self, response: httpx.Response) -> None:
-        if response.status_code >= 400:
+        if response.is_error:
             detail = response.json().get("detail", response.text)
             raise httpx.HTTPStatusError(
                 f"{response.status_code}: {detail}",

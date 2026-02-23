@@ -14,6 +14,21 @@ class Settings(BaseSettings):
     base_url: str = "http://localhost:8000"
     database_url: str = "postgresql+asyncpg://aimon:changeme@localhost:5431/aimonitoring"
 
+    # Maximum records sampled for drift detection and distribution comparison.
+    # Statistical tests (KS, PSI, chi-squared) give reliable results well below 10k samples.
+    # Override via DRIFT_MAX_SAMPLES env var.
+    drift_max_samples: int = 10_000
+
+    # Reference data cap – uploads exceeding this many records are rejected (HTTP 422).
+    # Override via REFERENCE_DATA_MAX_RECORDS env var.
+    reference_data_max_records: int = 50_000
+
+    # Maximum rows fed into the dashboard histogram/stats computation.
+    # The most recent N records are used so the distribution reflects current behaviour.
+    # Histograms are statistically stable well below 100k samples.
+    # Override via DASHBOARD_MAX_SAMPLES env var.
+    dashboard_max_samples: int = 50_000
+
     # Cloud SQL Connector (opt-in: set CLOUD_SQL_INSTANCE to enable)
     cloud_sql_instance: str | None = None
     cloud_sql_ip_type: str = "public"

@@ -6,6 +6,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.schemas.model import SchemaFieldCreate
+from yaai.server.config import settings
 from yaai.server.models.inference import GroundTruth, InferenceData, ReferenceData
 from yaai.server.models.job import JobConfig
 from yaai.server.models.model import SchemaField
@@ -139,6 +140,21 @@ class InferenceService(BaseService):
         version = await self.get_version_with_schema(version_id)
         if version.model_id != model_id:
             raise HTTPException(status_code=404, detail="Model version not found")
+
+        max_records = settings.reference_data_max_records
+        if len(records) > max_records:
+            existing_count_result = await self.db.execute(
+                select(func.count()).where(ReferenceData.model_version_id == version_id)
+            )
+            existing_count = existing_count_result.scalar_one()
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Upload exceeds the maximum of {max_records} reference records. "
+                    f"Got {len(records)} (currently {existing_count} stored). "
+                    f"Reduce the upload size or increase REFERENCE_DATA_MAX_RECORDS."
+                ),
+            )
 
         await self.db.execute(delete(ReferenceData).where(ReferenceData.model_version_id == version_id))
 

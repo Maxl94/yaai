@@ -32,6 +32,7 @@ class InferenceData(UUIDMixin, Base):
 
 class ReferenceData(UUIDMixin, Base):
     __tablename__ = "reference_data"
+    __table_args__ = (Index("ix_reference_version", "model_version_id"),)
 
     model_version_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("model_versions.id", ondelete="CASCADE"), nullable=False

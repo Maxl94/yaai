@@ -34,7 +34,7 @@ class InferenceBatchResult(BaseModel):
 
 
 class ReferenceDataUpload(BaseModel):
-    records: list[dict] = Field(..., max_length=50000)
+    records: list[dict]
 
 
 class ReferenceDataResult(BaseModel):

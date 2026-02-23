@@ -30,7 +30,7 @@ def run_migrations() -> None:
     alembic_cfg = AlembicConfig(str(_SERVER_DIR / "alembic.ini"))
 
     if settings.cloud_sql_instance:
-        from yaai.server.cloud_sql import CloudSQLConnector
+        from yaai.server.cloud_sql import CloudSQLConnector  # noqa: PLC0415
 
         logger.info("Running migrations via Cloud SQL connector ...")
         engine = CloudSQLConnector.create_sync_engine()

@@ -20,7 +20,7 @@ def init_engine(async_creator=None):
         async_creator: Optional async callable for Cloud SQL Connector.
                        When provided, creates engine with async_creator param.
     """
-    global engine, async_session
+    global engine, async_session  # noqa: PLW0603
     if async_creator is not None:
         engine = create_async_engine(
             "postgresql+asyncpg://",

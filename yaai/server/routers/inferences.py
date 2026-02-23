@@ -23,6 +23,7 @@ from yaai.server.auth.dependencies import (
     require_model_write,
     resolve_model_id_from_version,
 )
+from yaai.server.config import settings
 from yaai.server.database import get_db
 from yaai.server.models.inference import InferenceData
 from yaai.server.models.model import ModelVersion
@@ -33,7 +34,7 @@ router = APIRouter(tags=["inferences"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/inferences", status_code=201)
-@limiter.limit("60/minute")
+@limiter.limit("600/minute")
 async def create_inference(
     request: Request,
     data: InferenceCreate,
@@ -48,7 +49,7 @@ async def create_inference(
 
 
 @router.post("/inferences/batch", status_code=201)
-@limiter.limit("60/minute")
+@limiter.limit("600/minute")
 async def create_inference_batch(
     request: Request,
     data: InferenceBatchCreate,
@@ -99,7 +100,7 @@ async def get_inference_volume(
 
 
 @router.post("/models/{model_id}/versions/{version_id}/reference-data", status_code=201)
-@limiter.limit("30/minute")
+@limiter.limit("300/minute")
 async def upload_reference_data(
     request: Request,
     model_id: uuid.UUID,
@@ -108,6 +109,12 @@ async def upload_reference_data(
     _identity: CurrentIdentity = Depends(require_model_write),
     db: AsyncSession = Depends(get_db),
 ):
+    if len(data.records) > settings.reference_data_max_records:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Upload exceeds the maximum of {settings.reference_data_max_records} reference records. "
+            f"Got {len(data.records)}. Reduce the upload size or increase REFERENCE_DATA_MAX_RECORDS.",
+        )
     svc = InferenceService(db)
     count = await svc.upload_reference_data(model_id, version_id, data.records)
     return {"data": ReferenceDataResult(ingested=count, model_version_id=version_id)}
