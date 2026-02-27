@@ -48,7 +48,7 @@ jobs:
           ref: release-please--branches--main
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         if: steps.check-branch.outputs.exists == 'true'
         with:
           version: "latest"
@@ -103,7 +103,7 @@ jobs:
           mkdir -p yaai/server/static
           cp -r frontend/dist/* yaai/server/static/
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
