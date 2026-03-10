@@ -24,6 +24,37 @@ client = YaaiClient("http://localhost:8000/api/v1")
 
 When no `api_key` is passed, the client uses Google ADC and refreshes tokens automatically.
 
+## Quick start
+
+The fastest way to get going: copy the **Model ID** from the UI, then use `get_or_create_version` which auto-infers the schema from a sample record.
+
+```python
+import asyncio
+from yaai import YaaiClient
+
+async def main():
+    async with YaaiClient("http://localhost:8000/api/v1", api_key="yaam_...") as client:
+
+        # Model ID copied from the frontend (click the copy icon)
+        MODEL_ID = "your-model-uuid-here"
+
+        # Creates version "v2" if it doesn't exist yet; schema is inferred from the sample
+        version = await client.get_or_create_version(
+            MODEL_ID,
+            "v2",
+            sample_data={"inputs": {"amount": 100.0, "country": "DE"}, "outputs": {"is_fraud": "false"}},
+        )
+
+        # Log inferences — only the version ID is needed
+        await client.add_inference(
+            model_version_id=version.id,
+            inputs={"amount": 42.0, "country": "US"},
+            outputs={"is_fraud": "false"},
+        )
+
+asyncio.run(main())
+```
+
 ## Usage
 
 The client is an async context manager:
@@ -88,6 +119,8 @@ asyncio.run(main())
 | `list_models()` | List all models |
 | `delete_model(model_id)` | Delete a model and all its data |
 | `create_model_version(model_id, version, schema_fields)` | Create a versioned schema |
+| `get_version(model_id, version_id)` | Fetch full version details |
+| `get_or_create_version(model_id, version, *, sample_data)` | Find a version by label or auto-create it from sample data |
 | `add_inference(model_version_id, inputs, outputs)` | Log one inference |
 | `add_inferences(model_version_id, records)` | Log a batch of inferences |
 | `add_reference_data(model_id, model_version_id, records)` | Upload baseline data |

@@ -1,3 +1,4 @@
+import importlib.metadata
 import logging
 import os
 import secrets as _secrets
@@ -152,7 +153,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="YAAI Monitoring",
     description="Yet Another AI Monitoring — schema-driven ML model monitoring platform",
-    version="0.1.0",
+    version=importlib.metadata.version("yaai-monitoring"),
     lifespan=lifespan,
 )
 
