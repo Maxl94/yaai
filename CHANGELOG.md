@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Maxl94/yaai/compare/v0.3.0...v0.4.0) (2026-03-10)
+
+
+### Features
+
+* **client:** add get_version and get_or_create_version methods ([1ae1bc6](https://github.com/Maxl94/yaai/commit/1ae1bc6d1e69fb093571a1b8b45f4496f60c014a))
+
 ## [0.3.0](https://github.com/Maxl94/yaai/compare/v0.2.3...v0.3.0) (2026-02-23)
 
 
