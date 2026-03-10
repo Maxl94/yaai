@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { modelsApi } from '@/api/models'
 import { authApi } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import CopyableId from '@/components/CopyableId.vue'
 import type { Model, ModelVersionSummary, SchemaFieldCreate, SchemaField, ModelAccessEntry, ServiceAccount } from '@/types'
 
 const route = useRoute()
@@ -290,6 +291,7 @@ onMounted(() => {
       </v-card-title>
       <v-card-text>
         <template v-if="!editingName">
+          <CopyableId label="Model ID" :value="model.id" :truncate="false" class="mb-2" />
           <p v-if="model.description">{{ model.description }}</p>
           <p v-else class="text-grey">No description</p>
         </template>
@@ -322,6 +324,7 @@ onMounted(() => {
       <thead>
         <tr>
           <th>Version</th>
+          <th>ID</th>
           <th>Status</th>
           <th>Schema Fields</th>
           <th>Created</th>
@@ -336,6 +339,7 @@ onMounted(() => {
           @click="navigateToVersion(version)"
         >
           <td>{{ version.version }}</td>
+          <td><CopyableId :value="version.id" /></td>
           <td>
             <v-chip :color="version.is_active ? 'success' : 'default'" size="small">
               {{ version.is_active ? 'Active' : 'Inactive' }}

@@ -23,6 +23,7 @@ from yaai.schemas.model import (
     ModelRead,
     ModelVersionCreate,
     ModelVersionRead,
+    ModelVersionSummary,
     SchemaFieldCreate,
     ValidateModelVersionBatchRequest,
     ValidateModelVersionRequest,
@@ -164,6 +165,15 @@ class YaaiClient:
 
     # -- Versions --
 
+    async def get_version(
+        self,
+        model_id: uuid.UUID,
+        version_id: uuid.UUID,
+    ) -> ModelVersionRead:
+        """Fetch full details for a specific model version."""
+        resp = await self._request("GET", f"/models/{model_id}/versions/{version_id}")
+        return ModelVersionRead.model_validate(resp.json()["data"])
+
     async def create_model_version(
         self,
         model_id: uuid.UUID,
@@ -185,6 +195,63 @@ class YaaiClient:
             json=payload.model_dump(by_alias=True),
         )
         return ModelVersionRead.model_validate(resp.json()["data"])
+
+    async def get_or_create_version(
+        self,
+        model_id: uuid.UUID,
+        version: str,
+        *,
+        sample_data: dict[str, dict] | None = None,
+        description: str | None = None,
+        keep_previous_active: bool = False,
+    ) -> ModelVersionRead | ModelVersionSummary:
+        """Return an existing version by label, or create one from sample data.
+
+        Looks up the model's versions and matches by the ``version`` label.
+        If found, returns the existing :class:`ModelVersionSummary`.  If not
+        found and ``sample_data`` is provided, infers the schema from the
+        sample and creates a new version.
+
+        Args:
+            model_id: The UUID of the parent model.
+            version: Human-readable version label (e.g. ``"v2.0"``).
+            sample_data: A dict with ``"inputs"`` and ``"outputs"`` keys used
+                to infer the schema when the version doesn't exist yet.
+            description: Optional description for the new version.
+            keep_previous_active: If *True*, existing active versions stay
+                active when creating a new version.
+
+        Returns:
+            The matched :class:`ModelVersionSummary` if the version already
+            exists, or a freshly created :class:`ModelVersionRead`.
+
+        Raises:
+            ValueError: If the version doesn't exist and no ``sample_data``
+                was provided to infer the schema.
+        """
+        model = await self.get_model(model_id)
+        for v in model.versions:
+            if v.version == version:
+                return v
+
+        # Version doesn't exist — create it
+        if sample_data is None:
+            msg = (
+                f"Version '{version}' does not exist on model {model_id} "
+                "and no sample_data was provided to infer the schema. "
+                "Pass sample_data={'inputs': {...}, 'outputs': {...}} "
+                "so the schema can be auto-created."
+            )
+            raise ValueError(msg)
+
+        inferred = await self.infer_schema(sample_data)
+        return await self.create_model_version(
+            model_id,
+            version,
+            inferred.schema_fields,
+            description=description,
+            keep_previous_active=keep_previous_active,
+        )
 
     # -- Inferences --
 

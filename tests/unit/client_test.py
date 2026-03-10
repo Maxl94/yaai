@@ -314,6 +314,169 @@ class TestClientContextManager:
         # After exiting, client should be closed (aclose called)
 
 
+class TestClientVersions:
+    async def test_get_version(self):
+        transport = MockTransport()
+        model_id = str(uuid.uuid4())
+        version_id = str(uuid.uuid4())
+        transport.add_response(
+            "GET",
+            f"/models/{model_id}/versions/{version_id}",
+            200,
+            {
+                "data": {
+                    "id": version_id,
+                    "model_id": model_id,
+                    "version": "v1.0",
+                    "description": None,
+                    "is_active": True,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "schema_fields": [],
+                }
+            },
+        )
+        client = _make_client(transport)
+        result = await client.get_version(uuid.UUID(model_id), uuid.UUID(version_id))
+        assert result.version == "v1.0"
+        assert str(result.id) == version_id
+
+    async def test_get_or_create_version_existing(self):
+        """When the version already exists, return it without creating."""
+        transport = MockTransport()
+        model_id = str(uuid.uuid4())
+        version_id = str(uuid.uuid4())
+        transport.add_response(
+            "GET",
+            f"/models/{model_id}",
+            200,
+            {
+                "data": {
+                    "id": model_id,
+                    "name": "my-model",
+                    "description": None,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "versions": [
+                        {
+                            "id": version_id,
+                            "version": "v1.0",
+                            "is_active": True,
+                            "created_at": "2024-01-01T00:00:00Z",
+                            "schema_field_count": 3,
+                        }
+                    ],
+                }
+            },
+        )
+        client = _make_client(transport)
+        result = await client.get_or_create_version(uuid.UUID(model_id), "v1.0")
+        assert result.version == "v1.0"
+        assert str(result.id) == version_id
+        # Only one request made (get_model), no create
+        assert len(transport.requests) == 1
+
+    async def test_get_or_create_version_creates_new(self):
+        """When the version doesn't exist and sample_data is provided, create it."""
+        transport = MockTransport()
+        model_id = str(uuid.uuid4())
+        new_version_id = str(uuid.uuid4())
+
+        # get_model returns no versions
+        transport.add_response(
+            "GET",
+            f"/models/{model_id}",
+            200,
+            {
+                "data": {
+                    "id": model_id,
+                    "name": "my-model",
+                    "description": None,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "versions": [],
+                }
+            },
+        )
+        # infer_schema
+        transport.add_response(
+            "POST",
+            "/schema/infer",
+            200,
+            {
+                "data": {
+                    "schema_fields": [
+                        {"field_name": "amount", "direction": "input", "data_type": "numerical"},
+                        {"field_name": "fraud", "direction": "output", "data_type": "categorical"},
+                    ]
+                }
+            },
+        )
+        # create_model_version
+        transport.add_response(
+            "POST",
+            f"/models/{model_id}/versions",
+            201,
+            {
+                "data": {
+                    "id": new_version_id,
+                    "model_id": model_id,
+                    "version": "v2.0",
+                    "description": None,
+                    "is_active": True,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "schema_fields": [
+                        {
+                            "id": str(uuid.uuid4()),
+                            "field_name": "amount",
+                            "direction": "input",
+                            "data_type": "numerical",
+                        },
+                        {
+                            "id": str(uuid.uuid4()),
+                            "field_name": "fraud",
+                            "direction": "output",
+                            "data_type": "categorical",
+                        },
+                    ],
+                }
+            },
+        )
+
+        client = _make_client(transport)
+        result = await client.get_or_create_version(
+            uuid.UUID(model_id),
+            "v2.0",
+            sample_data={"inputs": {"amount": 100.0}, "outputs": {"fraud": "false"}},
+        )
+        assert result.version == "v2.0"
+        assert str(result.id) == new_version_id
+        # Three requests: get_model, infer_schema, create_model_version
+        assert len(transport.requests) == 3
+
+    async def test_get_or_create_version_no_sample_raises(self):
+        """When the version doesn't exist and no sample_data, raise ValueError."""
+        transport = MockTransport()
+        model_id = str(uuid.uuid4())
+        transport.add_response(
+            "GET",
+            f"/models/{model_id}",
+            200,
+            {
+                "data": {
+                    "id": model_id,
+                    "name": "my-model",
+                    "description": None,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "versions": [],
+                }
+            },
+        )
+        client = _make_client(transport)
+        with pytest.raises(ValueError, match="no sample_data was provided"):
+            await client.get_or_create_version(uuid.UUID(model_id), "v1.0")
+
+
 class TestClientCredentialRefresh:
     async def test_refresh_noop_when_no_credentials(self):
         transport = MockTransport()

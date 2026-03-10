@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { modelsApi } from '@/api/models'
+import CopyableId from '@/components/CopyableId.vue'
 import type { Model } from '@/types'
 
 const router = useRouter()
@@ -205,6 +206,7 @@ onMounted(async () => {
             <p v-else class="model-description text-disabled">
               No description
             </p>
+            <CopyableId label="ID" :value="model.id" class="mt-2" />
           </v-card-text>
 
           <!-- Card Footer Stats -->

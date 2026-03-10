@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import CopyableId from '@/components/CopyableId.vue'
 
 const props = defineProps<{
   modelId: string
@@ -30,6 +31,10 @@ const activeTab = computed(() => {
 
 <template>
   <div class="version-nav mb-4">
+    <div class="id-bar d-flex align-center ga-4 mb-2">
+      <CopyableId label="Model ID" :value="modelId" />
+      <CopyableId label="Version ID" :value="versionId" />
+    </div>
     <v-tabs
       :model-value="activeTab"
       color="primary"
