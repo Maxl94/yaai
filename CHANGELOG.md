@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/Maxl94/yaai/compare/v0.4.0...v0.5.0) (2026-03-17)
+
+
+### Features
+
+* add get_version_by_label method to YaaiClient for version lookup by label and updates documentation and code comments ([75aa125](https://github.com/Maxl94/yaai/commit/75aa125fb0bacde7370ab81e92e12f6884ac1509))
+
 ## [0.4.0](https://github.com/Maxl94/yaai/compare/v0.3.0...v0.4.0) (2026-03-10)
 
 
