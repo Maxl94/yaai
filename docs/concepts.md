@@ -87,7 +87,7 @@ For a detailed walkthrough of how each metric works (with ASCII art and intuitio
 Drift detection runs on a schedule. A **job** defines:
 
 - **When** to check -- cron expression (e.g., `0 2 * * *` for daily at 2am)
-- **What** to compare -- `vs_reference` (against your baseline) or `rolling_window` (against the previous period)
+- **What** to compare -- `vs_reference` (against your baseline) or `rolling_window` (against the previous period). Currently, each job supports only one comparison type; combining both in a single job config is not yet supported.
 - **How much** data to look at -- window size (e.g., "1 day", "7 days")
 
 When you create a model version, YAAI creates a default job automatically (daily at 2am, comparing the last day of inferences against reference data). It activates when you upload reference data.

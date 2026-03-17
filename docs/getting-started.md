@@ -71,6 +71,25 @@ async def main():
             ],
         )
 
+        # Alternative: get_or_create_version is idempotent — it always needs
+        # schema info, but ignores it when the version already exists.
+        # With an explicit schema:
+        #   version = await client.get_or_create_version(
+        #       model_id=model.id,
+        #       version="v1.0",
+        #       schema_fields=[...],    # same list as above
+        #   )
+        # Or let YAAI infer the schema from a sample:
+        #   version = await client.get_or_create_version(
+        #       model_id=model.id,
+        #       version="v1.0",
+        #       sample_data={
+        #           "inputs": {"age": 35, "income": 72000, "region": "west"},
+        #           "outputs": {"churn_prob": 0.73},
+        #       },
+        #   )
+        # For a pure lookup: await client.get_version_by_label(model.id, "v1.0")
+
         # 3. Upload reference data (your training distribution)
         #    This is the baseline that drift detection compares against.
         import random

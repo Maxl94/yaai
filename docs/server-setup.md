@@ -5,7 +5,7 @@ This guide walks you through setting up the YAAI server for local development. F
 ## Prerequisites
 
 - **Docker** (for PostgreSQL, or bring your own)
-- **Python 3.12+** and [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- **Python 3.11+** and [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - **Node.js 20+** (only for frontend development)
 
 ## 1. Install the server

@@ -26,7 +26,9 @@ When no `api_key` is passed, the client uses Google ADC and refreshes tokens aut
 
 ## Quick start
 
-The fastest way to get going: copy the **Model ID** from the UI, then use `get_or_create_version` which auto-infers the schema from a sample record.
+The fastest way to get going: copy the **Model ID** from the UI, then use `get_or_create_version`. You always provide the schema info (either a sample record or an explicit field list). If the version already exists the schema params are ignored; if it doesn't exist, a new version is created. This makes the call idempotent — it always succeeds regardless of prior state.
+
+### Option 1: Auto-infer schema from sample data
 
 ```python
 import asyncio
@@ -35,17 +37,16 @@ from yaai import YaaiClient
 async def main():
     async with YaaiClient("http://localhost:8000/api/v1", api_key="yaam_...") as client:
 
-        # Model ID copied from the frontend (click the copy icon)
         MODEL_ID = "your-model-uuid-here"
 
-        # Creates version "v2" if it doesn't exist yet; schema is inferred from the sample
+        # Idempotent: creates version "v2" if it doesn't exist; returns it if it does.
+        # Schema is inferred from the sample record.
         version = await client.get_or_create_version(
             MODEL_ID,
             "v2",
             sample_data={"inputs": {"amount": 100.0, "country": "DE"}, "outputs": {"is_fraud": "false"}},
         )
 
-        # Log inferences — only the version ID is needed
         await client.add_inference(
             model_version_id=version.id,
             inputs={"amount": 42.0, "country": "US"},
@@ -53,6 +54,42 @@ async def main():
         )
 
 asyncio.run(main())
+```
+
+### Option 2: Define schema explicitly
+
+```python
+import asyncio
+from yaai import YaaiClient
+from yaai.schemas.model import SchemaFieldCreate
+
+async def main():
+    async with YaaiClient("http://localhost:8000/api/v1", api_key="yaam_...") as client:
+
+        MODEL_ID = "your-model-uuid-here"
+
+        # Same idempotent behaviour, but with an explicit schema definition.
+        version = await client.get_or_create_version(
+            MODEL_ID,
+            "v2",
+            schema_fields=[
+                SchemaFieldCreate(field_name="amount", direction="input", data_type="numerical"),
+                SchemaFieldCreate(field_name="country", direction="input", data_type="categorical"),
+                SchemaFieldCreate(field_name="is_fraud", direction="output", data_type="categorical"),
+            ],
+        )
+
+        await client.add_inference(
+            model_version_id=version.id,
+            inputs={"amount": 42.0, "country": "US"},
+            outputs={"is_fraud": "false"},
+        )
+
+asyncio.run(main())
+```
+
+> **Note:** `sample_data` and `schema_fields` are mutually exclusive — pass exactly one.
+> If you only need to look up a version without creating it, use `get_version_by_label` instead.
 ```
 
 ## Usage
@@ -120,7 +157,8 @@ asyncio.run(main())
 | `delete_model(model_id)` | Delete a model and all its data |
 | `create_model_version(model_id, version, schema_fields)` | Create a versioned schema |
 | `get_version(model_id, version_id)` | Fetch full version details |
-| `get_or_create_version(model_id, version, *, sample_data)` | Find a version by label or auto-create it from sample data |
+| `get_version_by_label(model_id, version)` | Look up a version by label (returns `None` if not found) |
+| `get_or_create_version(model_id, version, *, sample_data, schema_fields)` | Idempotent upsert — always requires `sample_data` or `schema_fields`; returns existing or creates new |
 | `add_inference(model_version_id, inputs, outputs)` | Log one inference |
 | `add_inferences(model_version_id, records)` | Log a batch of inferences |
 | `add_reference_data(model_id, model_version_id, records)` | Upload baseline data |

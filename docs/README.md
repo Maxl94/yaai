@@ -35,32 +35,20 @@ YAAI Monitoring (Yet Another AI Monitoring) is a self-hosted platform for automa
 
 ## Documentation Index
 
-### Project
-
-- [Vision & Goals](vision.md) — project scope, differentiators, non-goals
-
 ### Architecture
 
 - [Architecture Overview](architecture.md) — system design, tech stack, component layout
-- [Data Model](data-model.md) — database schemas, entity relationships, storage strategy
-- [API Design](api-design.md) — REST endpoints, request/response schemas
-- [Frontend](frontend.md) — pages, components, auto-dashboard rendering
 
 ### Guides
 
+- [Getting Started](getting-started.md) — quick start guide
+- [Server Setup](server-setup.md) — local development setup
+- [Deployment](deployment.md) — production deployment
+- [Configuration](configuration.md) — environment variables and settings
+- [Concepts](concepts.md) — models, versions, schemas, drift detection
 - [Drift Guide](drift-guide.md) — how drift metrics work (PSI, KS, Chi-squared, JSD), handling non-tabular models
 
-### Feature Specifications
+### Reference
 
-- [Model Management](features/model-management.md) — model & version CRUD, schema definition
-- [Inference Tracking](features/inference-tracking.md) — data ingestion, validation, storage
-- [Auto Dashboard](features/auto-dashboard.md) — schema-to-chart generation, layout rules
-- [Data Comparison](features/data-comparison.md) — time-window & reference comparisons
-- [Drift Detection](features/drift-detection.md) — metrics, thresholds, alerting
-- [Job Scheduling](features/job-scheduling.md) — cron jobs, run history, result storage
-
-### Decisions
-
-Architecture Decision Records (ADRs) document key technical choices.
-
-- [ADR-001: Tech Stack](decisions/001-tech-stack.md)
+- [API Reference](reference/api.md) — REST API (OpenAPI / Swagger)
+- [SDK Reference](reference/sdk.md) — Python client library

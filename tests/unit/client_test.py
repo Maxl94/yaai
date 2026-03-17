@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from yaai.client import YaaiClient
+from yaai.schemas.model import SchemaFieldCreate
 
 
 @pytest.fixture
@@ -369,7 +370,14 @@ class TestClientVersions:
             },
         )
         client = _make_client(transport)
-        result = await client.get_or_create_version(uuid.UUID(model_id), "v1.0")
+        # schema_fields is required, but ignored when the version already exists
+        result = await client.get_or_create_version(
+            uuid.UUID(model_id),
+            "v1.0",
+            schema_fields=[
+                SchemaFieldCreate(field_name="x", direction="input", data_type="numerical"),
+            ],
+        )
         assert result.version == "v1.0"
         assert str(result.id) == version_id
         # Only one request made (get_model), no create
@@ -453,8 +461,136 @@ class TestClientVersions:
         # Three requests: get_model, infer_schema, create_model_version
         assert len(transport.requests) == 3
 
-    async def test_get_or_create_version_no_sample_raises(self):
-        """When the version doesn't exist and no sample_data, raise ValueError."""
+    async def test_get_or_create_version_creates_new_with_schema_fields(self):
+        """When the version doesn't exist and schema_fields is provided, create directly."""
+        transport = MockTransport()
+        model_id = str(uuid.uuid4())
+        new_version_id = str(uuid.uuid4())
+
+        # get_model returns no versions
+        transport.add_response(
+            "GET",
+            f"/models/{model_id}",
+            200,
+            {
+                "data": {
+                    "id": model_id,
+                    "name": "my-model",
+                    "description": None,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "versions": [],
+                }
+            },
+        )
+        # create_model_version (no infer_schema call expected)
+        transport.add_response(
+            "POST",
+            f"/models/{model_id}/versions",
+            201,
+            {
+                "data": {
+                    "id": new_version_id,
+                    "model_id": model_id,
+                    "version": "v3.0",
+                    "description": None,
+                    "is_active": True,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "schema_fields": [
+                        {
+                            "id": str(uuid.uuid4()),
+                            "field_name": "amount",
+                            "direction": "input",
+                            "data_type": "numerical",
+                        },
+                        {
+                            "id": str(uuid.uuid4()),
+                            "field_name": "fraud",
+                            "direction": "output",
+                            "data_type": "categorical",
+                        },
+                    ],
+                }
+            },
+        )
+
+        client = _make_client(transport)
+        result = await client.get_or_create_version(
+            uuid.UUID(model_id),
+            "v3.0",
+            schema_fields=[
+                SchemaFieldCreate(field_name="amount", direction="input", data_type="numerical"),
+                SchemaFieldCreate(field_name="fraud", direction="output", data_type="categorical"),
+            ],
+        )
+        assert result.version == "v3.0"
+        assert str(result.id) == new_version_id
+        # Two requests: get_model, create_model_version (no infer_schema)
+        assert len(transport.requests) == 2
+
+    async def test_get_or_create_version_both_params_raises(self):
+        """Passing both sample_data and schema_fields raises ValueError."""
+        transport = MockTransport()
+        client = _make_client(transport)
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await client.get_or_create_version(
+                uuid.uuid4(),
+                "v1.0",
+                sample_data={"inputs": {"x": 1}, "outputs": {"y": 2}},
+                schema_fields=[
+                    SchemaFieldCreate(field_name="x", direction="input", data_type="numerical"),
+                ],
+            )
+        # No requests should have been made
+        assert len(transport.requests) == 0
+
+    async def test_get_or_create_version_neither_param_raises(self):
+        """Passing neither sample_data nor schema_fields raises eagerly."""
+        transport = MockTransport()
+        client = _make_client(transport)
+        with pytest.raises(ValueError, match="Either sample_data or schema_fields must be provided"):
+            await client.get_or_create_version(uuid.uuid4(), "v1.0")
+        # No requests should have been made — validated before hitting server
+        assert len(transport.requests) == 0
+
+
+class TestClientGetVersionByLabel:
+    async def test_get_version_by_label_found(self):
+        """Returns ModelVersionSummary when a matching version exists."""
+        transport = MockTransport()
+        model_id = str(uuid.uuid4())
+        version_id = str(uuid.uuid4())
+        transport.add_response(
+            "GET",
+            f"/models/{model_id}",
+            200,
+            {
+                "data": {
+                    "id": model_id,
+                    "name": "my-model",
+                    "description": None,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "versions": [
+                        {
+                            "id": version_id,
+                            "version": "v1.0",
+                            "is_active": True,
+                            "created_at": "2024-01-01T00:00:00Z",
+                            "schema_field_count": 3,
+                        }
+                    ],
+                }
+            },
+        )
+        client = _make_client(transport)
+        result = await client.get_version_by_label(uuid.UUID(model_id), "v1.0")
+        assert result is not None
+        assert result.version == "v1.0"
+        assert str(result.id) == version_id
+
+    async def test_get_version_by_label_not_found(self):
+        """Returns None when no version matches the label."""
         transport = MockTransport()
         model_id = str(uuid.uuid4())
         transport.add_response(
@@ -473,8 +609,8 @@ class TestClientVersions:
             },
         )
         client = _make_client(transport)
-        with pytest.raises(ValueError, match="no sample_data was provided"):
-            await client.get_or_create_version(uuid.UUID(model_id), "v1.0")
+        result = await client.get_version_by_label(uuid.UUID(model_id), "v1.0")
+        assert result is None
 
 
 class TestClientCredentialRefresh:
