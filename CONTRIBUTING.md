@@ -6,7 +6,7 @@ Thanks for considering a contribution! This guide will help you get set up and e
 
 You'll need the following installed on your machine:
 
-- **Python 3.12+** — the backend language ([python.org](https://www.python.org/downloads/))
+- **Python 3.11+** — the backend language ([python.org](https://www.python.org/downloads/))
 - **Node.js 20+** — for the Vue frontend ([nodejs.org](https://nodejs.org/))
 - **Docker** — to run PostgreSQL locally ([docker.com](https://www.docker.com/get-started/))
 - **[uv](https://docs.astral.sh/uv/)** — a fast Python package manager (install with `curl -LsSf https://astral.sh/uv/install.sh | sh`)

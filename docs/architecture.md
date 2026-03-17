@@ -54,7 +54,7 @@
 | **Job scheduler** | APScheduler | Lightweight, cron support, runs in-process (no Redis/Celery needed) |
 | **Drift computation** | scipy + numpy | `scipy.stats` has KS test, chi-squared; numpy for PSI calculation |
 | **Frontend framework** | Vue 3 | Composition API, TypeScript, simple mental model |
-| **UI components** | Vuetify 3 | Tables, cards, forms, navigation — all needed components |
+| **UI components** | Vuetify 4 (beta) | Tables, cards, forms, navigation — all needed components |
 | **Charts** | Apache ECharts (vue-echarts) | Overlaid histograms, grouped bars, line charts, strong tooltips |
 
 ## Deployment

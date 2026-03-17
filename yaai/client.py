@@ -196,27 +196,49 @@ class YaaiClient:
         )
         return ModelVersionRead.model_validate(resp.json()["data"])
 
+    async def get_version_by_label(
+        self,
+        model_id: uuid.UUID,
+        version: str,
+    ) -> ModelVersionSummary | None:
+        """Look up a model version by its label.
+
+        Returns the :class:`ModelVersionSummary` if a version with the given
+        label exists, or ``None`` otherwise.
+        """
+        model = await self.get_model(model_id)
+        return next((v for v in model.versions if v.version == version), None)
+
     async def get_or_create_version(
         self,
         model_id: uuid.UUID,
         version: str,
         *,
         sample_data: dict[str, dict] | None = None,
+        schema_fields: list[SchemaFieldCreate] | None = None,
         description: str | None = None,
         keep_previous_active: bool = False,
     ) -> ModelVersionRead | ModelVersionSummary:
-        """Return an existing version by label, or create one from sample data.
+        """Idempotent version upsert: return existing or create new.
 
-        Looks up the model's versions and matches by the ``version`` label.
-        If found, returns the existing :class:`ModelVersionSummary`.  If not
-        found and ``sample_data`` is provided, infers the schema from the
-        sample and creates a new version.
+        Always requires exactly one of ``sample_data`` or ``schema_fields``
+        so the call is deterministic regardless of server state.  If the
+        version already exists the creation parameters are ignored and the
+        existing :class:`ModelVersionSummary` is returned.  If it doesn't
+        exist, a new version is created from the provided schema info.
+
+        For a pure lookup without creation parameters, use
+        :meth:`get_version_by_label` instead.
 
         Args:
             model_id: The UUID of the parent model.
             version: Human-readable version label (e.g. ``"v2.0"``).
             sample_data: A dict with ``"inputs"`` and ``"outputs"`` keys used
-                to infer the schema when the version doesn't exist yet.
+                to infer the schema.  Mutually exclusive with
+                ``schema_fields``.
+            schema_fields: An explicit list of :class:`SchemaFieldCreate`
+                objects defining the version's schema.  Mutually exclusive
+                with ``sample_data``.
             description: Optional description for the new version.
             keep_previous_active: If *True*, existing active versions stay
                 active when creating a new version.
@@ -226,23 +248,37 @@ class YaaiClient:
             exists, or a freshly created :class:`ModelVersionRead`.
 
         Raises:
-            ValueError: If the version doesn't exist and no ``sample_data``
-                was provided to infer the schema.
+            ValueError: If both ``sample_data`` and ``schema_fields`` are
+                provided, or if neither is provided.
         """
+        if sample_data is not None and schema_fields is not None:
+            msg = "sample_data and schema_fields are mutually exclusive. Provide one or the other, not both."
+            raise ValueError(msg)
+
+        if sample_data is None and schema_fields is None:
+            msg = (
+                "Either sample_data or schema_fields must be provided. "
+                "Pass sample_data={'inputs': {...}, 'outputs': {...}} to "
+                "auto-infer the schema, or pass schema_fields=[...] to "
+                "define it explicitly. For a pure lookup use "
+                "get_version_by_label() instead."
+            )
+            raise ValueError(msg)
+
         model = await self.get_model(model_id)
         for v in model.versions:
             if v.version == version:
                 return v
 
         # Version doesn't exist — create it
-        if sample_data is None:
-            msg = (
-                f"Version '{version}' does not exist on model {model_id} "
-                "and no sample_data was provided to infer the schema. "
-                "Pass sample_data={'inputs': {...}, 'outputs': {...}} "
-                "so the schema can be auto-created."
+        if schema_fields is not None:
+            return await self.create_model_version(
+                model_id,
+                version,
+                schema_fields,
+                description=description,
+                keep_previous_active=keep_previous_active,
             )
-            raise ValueError(msg)
 
         inferred = await self.infer_schema(sample_data)
         return await self.create_model_version(

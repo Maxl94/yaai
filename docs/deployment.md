@@ -151,7 +151,7 @@ Open your `BASE_URL` -- you should see the login screen. Migrations run automati
 
 ## Without Docker
 
-Install the server package and run uvicorn directly. You need Python 3.12+ and a PostgreSQL instance.
+Install the server package and run uvicorn directly. You need Python 3.11+ and a PostgreSQL instance.
 
 ```bash
 pip install "yaai-monitoring[server]"
