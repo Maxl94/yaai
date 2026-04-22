@@ -37,13 +37,13 @@ class YaaiClient:
     """Async client for the yaai monitoring API.
 
     Authenticates with either an explicit API key or Google Application
-    Default Credentials (ADC).  When no ``api_key`` is provided the client
+    Default Credentials (ADC). When no ``api_key`` is provided the client
     tries to obtain credentials via ``google.auth.default()`` — install
     ``yaai[gcp]`` to enable this.
 
     When ``target_audience`` is provided (recommended for Google SA auth),
-    the client requests an ID token scoped to that audience instead of a
-    generic access token.  The audience must match the server's configured
+    the client requests an ID token scoped to that audience. The audience
+    must match the server's configured
     ``GOOGLE_SA_AUDIENCE``.
 
     Usage::
@@ -56,7 +56,7 @@ class YaaiClient:
         async with YaaiClient("http://localhost:8000/api/v1", target_audience="https://yaai.example.com") as client:
             model = await client.create_model("my-model")
 
-        # With Google ADC (access token fallback)
+        # With Google user ADC (ID token)
         async with YaaiClient("http://localhost:8000/api/v1") as client:
             model = await client.create_model("my-model")
     """
@@ -81,6 +81,8 @@ class YaaiClient:
         try:
             import google.auth  # noqa: PLC0415
             import google.auth.transport.requests  # noqa: PLC0415
+            from google.auth import exceptions as google_auth_exceptions  # noqa: PLC0415  # noqa: PLC0415
+            from google.oauth2 import id_token as google_id_token  # noqa: PLC0415
         except ImportError as exc:
             msg = (
                 "No api_key provided and google-auth is not installed. "
@@ -92,23 +94,46 @@ class YaaiClient:
         self._google_request = google.auth.transport.requests.Request()
         credentials, _ = google.auth.default()
 
-        if target_audience and hasattr(credentials, "with_target_audience"):
-            # Service account credentials — native ID token support
-            self._credentials = credentials.with_target_audience(target_audience)
-            self._credentials.refresh(self._google_request)
-            token = self._credentials.token
+        if target_audience:
+            try:
+                self._credentials = google_id_token.fetch_id_token_credentials(
+                    target_audience,
+                    request=self._google_request,
+                )
+            except google_auth_exceptions.DefaultCredentialsError:
+                if hasattr(credentials, "with_target_audience"):
+                    self._credentials = credentials.with_target_audience(target_audience)
+                else:
+                    self._credentials = credentials
         else:
-            # User credentials (from `gcloud auth application-default login`).
-            # Refresh to get an ID token — ADC includes openid scope by default,
-            # so the token response contains an id_token with the user's email.
             self._credentials = credentials
-            self._credentials.refresh(self._google_request)
-            token = self._credentials.id_token
-            if not token:
+
+        self._credentials.refresh(self._google_request)
+        token = self._current_google_token()
+        if not token:
+            if target_audience:
+                msg = (
+                    "Could not obtain an ID token for the configured target_audience. "
+                    "Cloud Run and service-account credentials should use metadata or "
+                    "GOOGLE_APPLICATION_CREDENTIALS; user ADC falls back to a generic "
+                    "Google ID token when available."
+                )
+            else:
                 msg = "Could not obtain an ID token from user credentials. Run: gcloud auth application-default login"
-                raise RuntimeError(msg)
+            raise RuntimeError(msg)
 
         return {"Authorization": f"Bearer {token}"}
+
+    def _current_google_token(self) -> str | None:
+        """Return the current Google bearer token for the active credential."""
+        if self._credentials is None:
+            return None
+
+        token = getattr(self._credentials, "id_token", None)
+        if token:
+            return token
+
+        return getattr(self._credentials, "token", None)
 
     def _refresh_google_credentials(self) -> None:
         """Refresh Google credentials if expired. No-op for API key auth."""
@@ -116,8 +141,7 @@ class YaaiClient:
             return
         if not self._credentials.valid:
             self._credentials.refresh(self._google_request)
-            # Use id_token for user creds, .token for SA creds
-            token = self._credentials.id_token or self._credentials.token
+            token = self._current_google_token()
             self._client.headers["Authorization"] = f"Bearer {token}"
 
     async def _request(self, method: str, url: str, **kwargs: object) -> httpx.Response:
