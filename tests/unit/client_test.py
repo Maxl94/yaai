@@ -65,6 +65,64 @@ class TestClientInit:
             with pytest.raises(ImportError, match="google-auth"):
                 YaaiClient("http://localhost:8000/api/v1")
 
+    def test_init_with_target_audience_uses_id_token_helper_for_service_accounts(self):
+        import unittest.mock
+
+        class ServiceAccountIDTokenCredentials:
+            def __init__(self):
+                self.valid = True
+                self.token = None
+
+            def refresh(self, request):
+                self.token = "service-account-id-token"
+
+        request = object()
+        id_token_credentials = ServiceAccountIDTokenCredentials()
+
+        with (
+            unittest.mock.patch("google.auth.transport.requests.Request", return_value=request),
+            unittest.mock.patch("google.auth.default", return_value=(object(), None)),
+            unittest.mock.patch(
+                "google.oauth2.id_token.fetch_id_token_credentials",
+                return_value=id_token_credentials,
+            ) as mock_fetch,
+        ):
+            client = YaaiClient("http://localhost:8000/api/v1", target_audience="https://yaai.example.com")
+
+        mock_fetch.assert_called_once_with("https://yaai.example.com", request=request)
+        assert client._credentials is id_token_credentials
+        assert client._client.headers.get("Authorization") == "Bearer service-account-id-token"
+
+    def test_init_with_target_audience_falls_back_to_user_id_token(self):
+        import unittest.mock
+
+        from google.auth import exceptions as google_auth_exceptions
+
+        class UserCredentials:
+            def __init__(self):
+                self.valid = True
+                self.token = "access-token"
+                self.id_token = None
+
+            def refresh(self, request):
+                self.id_token = "user-id-token"
+
+        request = object()
+        user_credentials = UserCredentials()
+
+        with (
+            unittest.mock.patch("google.auth.transport.requests.Request", return_value=request),
+            unittest.mock.patch("google.auth.default", return_value=(user_credentials, None)),
+            unittest.mock.patch(
+                "google.oauth2.id_token.fetch_id_token_credentials",
+                side_effect=google_auth_exceptions.DefaultCredentialsError("no metadata"),
+            ),
+        ):
+            client = YaaiClient("http://localhost:8000/api/v1", target_audience="https://yaai.example.com")
+
+        assert client._credentials is user_credentials
+        assert client._client.headers.get("Authorization") == "Bearer user-id-token"
+
 
 class TestClientModels:
     async def test_create_model(self):
@@ -306,6 +364,26 @@ class TestClientErrorHandling:
         client = _make_client(transport)
         with pytest.raises(httpx.HTTPStatusError):
             await client.list_models()
+
+    def test_refresh_google_credentials_uses_token_when_id_token_attribute_is_missing(self):
+        class ServiceAccountIDTokenCredentials:
+            def __init__(self):
+                self.valid = False
+                self.token = "stale-token"
+
+            def refresh(self, request):
+                self.valid = True
+                self.token = "fresh-id-token"
+
+        transport = MockTransport()
+        client = _make_client(transport)
+        client._credentials = ServiceAccountIDTokenCredentials()
+        client._google_request = object()
+        client._client.headers.pop("X-API-Key")
+
+        client._refresh_google_credentials()
+
+        assert client._client.headers.get("Authorization") == "Bearer fresh-id-token"
 
 
 class TestClientContextManager:
