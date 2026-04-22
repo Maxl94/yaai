@@ -52,6 +52,17 @@ class TestClientInit:
         assert client._client.headers.get("X-API-Key") == "yaam_test"
         assert client._credentials is None
 
+    def test_init_with_custom_timeout(self):
+        client = YaaiClient("http://localhost:8000/api/v1", api_key="yaam_test", timeout=60.0)
+        assert client._client.timeout.read == 60.0
+        assert client._client.timeout.connect == 60.0
+        assert client._client.timeout.write == 60.0
+        assert client._client.timeout.pool == 60.0
+
+    def test_init_default_timeout(self):
+        client = YaaiClient("http://localhost:8000/api/v1", api_key="yaam_test")
+        assert client._client.timeout.read == 30.0
+
     def test_init_strips_trailing_slash(self):
         client = YaaiClient("http://localhost:8000/api/v1/", api_key="yaam_test")
         assert client._base_url == "http://localhost:8000/api/v1"
@@ -74,7 +85,7 @@ class TestClientInit:
                 self.token = None
 
             def refresh(self, request):
-                self.token = "service-account-id-token"
+                self.token = "service-account-id-token"  # noqa: S105
 
         request = object()
         id_token_credentials = ServiceAccountIDTokenCredentials()
@@ -101,11 +112,11 @@ class TestClientInit:
         class UserCredentials:
             def __init__(self):
                 self.valid = True
-                self.token = "access-token"
+                self.token = "access-token"  # noqa: S105
                 self.id_token = None
 
             def refresh(self, request):
-                self.id_token = "user-id-token"
+                self.id_token = "user-id-token"  # noqa: S105
 
         request = object()
         user_credentials = UserCredentials()
@@ -369,11 +380,11 @@ class TestClientErrorHandling:
         class ServiceAccountIDTokenCredentials:
             def __init__(self):
                 self.valid = False
-                self.token = "stale-token"
+                self.token = "stale-token"  # noqa: S105
 
             def refresh(self, request):
                 self.valid = True
-                self.token = "fresh-id-token"
+                self.token = "fresh-id-token"  # noqa: S105
 
         transport = MockTransport()
         client = _make_client(transport)

@@ -59,9 +59,20 @@ class YaaiClient:
         # With Google user ADC (ID token)
         async with YaaiClient("http://localhost:8000/api/v1") as client:
             model = await client.create_model("my-model")
+
+        # With a longer timeout for slow server responses
+        async with YaaiClient("http://localhost:8000/api/v1", api_key="yaam_...", timeout=60.0) as client:
+            model = await client.create_model("my-model")
     """
 
-    def __init__(self, base_url: str, *, api_key: str | None = None, target_audience: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        api_key: str | None = None,
+        target_audience: str | None = None,
+        timeout: float = 30.0,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._credentials = None
         self._google_request = None
@@ -71,10 +82,7 @@ class YaaiClient:
         else:
             headers = self._init_google_credentials(target_audience)
 
-        self._client = httpx.AsyncClient(
-            base_url=self._base_url,
-            headers=headers,
-        )
+        self._client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=timeout)
 
     def _init_google_credentials(self, target_audience: str | None = None) -> dict[str, str]:
         """Obtain Google ADC and return initial auth headers."""
