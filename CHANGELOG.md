@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/Maxl94/yaai/compare/v0.5.1...v0.6.0) (2026-04-22)
+
+
+### Features
+
+* add customizable timeout for YaaiClient initialization ([44489d3](https://github.com/Maxl94/yaai/commit/44489d3688918049ced2d0a717dd0ad09e698f94))
+
 ## [0.5.1](https://github.com/Maxl94/yaai/compare/v0.5.0...v0.5.1) (2026-04-22)
 
 
