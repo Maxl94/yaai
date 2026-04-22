@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/Maxl94/yaai/compare/v0.5.0...v0.5.1) (2026-04-22)
+
+
+### Bug Fixes
+
+* fix YaaiClient to support ID token retrieval for service accounts and improve credential handling ([39ce680](https://github.com/Maxl94/yaai/commit/39ce6802f3d6ebf143a6ae63b5b391cdaeeab08a))
+* fix YaaiClient to support ID token retrieval for service accounts and improve credential handling ([39ce680](https://github.com/Maxl94/yaai/commit/39ce6802f3d6ebf143a6ae63b5b391cdaeeab08a))
+
 ## [0.5.0](https://github.com/Maxl94/yaai/compare/v0.4.0...v0.5.0) (2026-03-17)
 
 
