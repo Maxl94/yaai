@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/Maxl94/yaai/compare/v0.6.0...v0.7.0) (2026-04-26)
+
+
+### Features
+
+* implement user deletion functionality with confirmation dialog and error handling along with better error handling ([0d06752](https://github.com/Maxl94/yaai/commit/0d067521f8a2f1d094a65292bee52fad9377408a))
+
 ## [0.6.0](https://github.com/Maxl94/yaai/compare/v0.5.1...v0.6.0) (2026-04-22)
 
 
