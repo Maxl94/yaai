@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.server.auth.config import AuthConfig
-from yaai.server.models.auth import APIKey, AuthProvider, ServiceAccount, User, UserRole
+from yaai.server.models.auth import APIKey, ServiceAccount, User
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +113,15 @@ async def validate_google_sa_token(config: AuthConfig, token: str, db: AsyncSess
     allowed = config.service_accounts.google.allowed_emails
     if not email or (allowed and email not in allowed):
         return None
-
     # Look up the service account in the database by email
     stmt = select(ServiceAccount).where(ServiceAccount.google_sa_email == email)
     sa_result = await db.execute(stmt)
     sa = sa_result.scalar_one_or_none()
     if sa is None or not sa.is_active:
+        return None
+
+    allowed = config.service_accounts.google.allowed_emails
+    if not email or (allowed and email not in allowed):
         return None
 
     result = {
@@ -178,23 +181,6 @@ async def validate_google_user_token(config: AuthConfig, token: str, db: AsyncSe
     stmt = select(User).where(User.email == email, User.is_active.is_(True))
     user_result = await db.execute(stmt)
     user = user_result.scalar_one_or_none()
-
-    # Auto-create user if enabled (mirrors browser OAuth auto_create_users)
-    if user is None and config.oauth.google.auto_create_users:
-        google_sub = claims.get("sub", "")
-        username = claims.get("name") or email.split("@", maxsplit=1)[0]
-        user = User(
-            username=username,
-            email=email,
-            role=UserRole(role),
-            auth_provider=AuthProvider.GOOGLE,
-            google_sub=google_sub,
-            is_active=True,
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-        logger.info("Auto-created user %s (%s) via Google ID token", username, email)
 
     if user is None:
         logger.debug("No active user found for email %s (auto_create disabled)", email)

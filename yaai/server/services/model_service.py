@@ -3,6 +3,7 @@ import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -38,7 +39,11 @@ class ModelService:
         """
         model = Model(name=data.name, description=data.description)
         self.db.add(model)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="Model with this name already exists") from None
         return await self.get_model(model.id)
 
     async def list_models(
@@ -126,7 +131,11 @@ class ModelService:
             model.name = data.name
         if data.description is not None:
             model.description = data.description
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="Model with this name already exists") from None
         return await self.get_model(model_id)
 
     async def delete_model(self, model_id: uuid.UUID) -> None:
@@ -190,7 +199,14 @@ class ModelService:
             is_active=True,
         )
         self.db.add(version)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Version '{data.version}' already exists for this model",
+            ) from None
 
         for field_data in data.schema_fields:
             field = SchemaField(

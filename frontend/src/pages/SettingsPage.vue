@@ -17,6 +17,9 @@ const editingUser = ref<AuthUser | null>(null)
 const editUserRole = ref('viewer')
 const editUserActive = ref(true)
 const savingUser = ref(false)
+const showDeleteUserDialog = ref(false)
+const userToDelete = ref<AuthUser | null>(null)
+const deletingUser = ref(false)
 
 const userHeaders = [
   { title: 'User', key: 'username' },
@@ -24,7 +27,7 @@ const userHeaders = [
   { title: 'Role', key: 'role', width: '120px' },
   { title: 'Provider', key: 'auth_provider', width: '120px' },
   { title: 'Status', key: 'is_active', width: '100px' },
-  { title: '', key: 'actions', sortable: false, width: '80px' },
+  { title: '', key: 'actions', sortable: false, width: '120px' },
 ]
 
 async function loadUsers() {
@@ -60,6 +63,26 @@ async function saveUser() {
     errorUsers.value = 'Failed to update user'
   } finally {
     savingUser.value = false
+  }
+}
+
+function confirmDeleteUser(user: AuthUser) {
+  userToDelete.value = user
+  showDeleteUserDialog.value = true
+}
+
+async function deleteUser() {
+  if (!userToDelete.value) return
+  deletingUser.value = true
+  try {
+    await authApi.deleteUser(userToDelete.value.id)
+    showDeleteUserDialog.value = false
+    userToDelete.value = null
+    await loadUsers()
+  } catch {
+    errorUsers.value = 'Failed to delete user'
+  } finally {
+    deletingUser.value = false
   }
 }
 
@@ -229,16 +252,27 @@ onMounted(() => {
               </v-chip>
             </template>
             <template #item.actions="{ item }">
-              <v-btn
-                v-if="item.id !== authStore.user?.id"
-                icon
-                size="small"
-                variant="text"
-                @click="openEditUser(item)"
-              >
-                <v-icon size="18">mdi-pencil-outline</v-icon>
-                <v-tooltip activator="parent" location="top">Edit user</v-tooltip>
-              </v-btn>
+              <div v-if="item.id !== authStore.user?.id" class="d-flex">
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  @click="openEditUser(item)"
+                >
+                  <v-icon size="18">mdi-pencil-outline</v-icon>
+                  <v-tooltip activator="parent" location="top">Edit user</v-tooltip>
+                </v-btn>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  color="error"
+                  @click="confirmDeleteUser(item)"
+                >
+                  <v-icon size="18">mdi-delete-outline</v-icon>
+                  <v-tooltip activator="parent" location="top">Delete user</v-tooltip>
+                </v-btn>
+              </div>
             </template>
           </v-data-table>
         </v-card>
@@ -295,6 +329,22 @@ onMounted(() => {
     </v-tabs-window>
 
     <!-- Dialogs -->
+
+    <!-- Delete User Confirmation -->
+    <v-dialog v-model="showDeleteUserDialog" max-width="440">
+      <v-card>
+        <v-card-title class="pa-4">Delete User</v-card-title>
+        <v-card-text>
+          Are you sure you want to delete <strong>{{ userToDelete?.username }}</strong>?
+          This action cannot be undone.
+        </v-card-text>
+        <v-card-actions class="pa-4">
+          <v-spacer />
+          <v-btn variant="text" @click="showDeleteUserDialog = false">Cancel</v-btn>
+          <v-btn color="error" variant="flat" :loading="deletingUser" @click="deleteUser">Delete</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Edit User Dialog -->
     <v-dialog v-model="showEditUserDialog" max-width="480">

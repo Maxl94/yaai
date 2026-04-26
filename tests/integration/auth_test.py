@@ -388,6 +388,12 @@ async def test_delete_user_not_found(owner_client: AsyncClient):
     assert resp.status_code == 404
 
 
+async def test_delete_user_self_not_allowed(owner_client: AsyncClient, seeded_owner: User):
+    resp = await owner_client.delete(f"/api/v1/auth/users/{seeded_owner.id}")
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Cannot delete your own account"
+
+
 async def test_viewer_cannot_list_users(viewer_client: AsyncClient):
     resp = await viewer_client.get("/api/v1/auth/users")
     assert resp.status_code == 403

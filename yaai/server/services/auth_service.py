@@ -4,7 +4,9 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from fastapi import HTTPException
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.server.auth.config import AuthConfig
@@ -94,11 +96,14 @@ class AuthService:
             google_sub=google_sub,
         )
         self.db.add(user)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="User with this username or email already exists") from None
         await self.db.refresh(user)
         return user
 
-    # Explicit allowlist of fields that can be updated via the admin API
     _UPDATABLE_USER_FIELDS = frozenset({"email", "role", "is_active"})
 
     async def update_user(self, user_id: uuid.UUID, **kwargs) -> User | None:
@@ -261,7 +266,11 @@ class AuthService:
             )
             self.db.add(api_key)
 
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="Service account with this name already exists") from None
         await self.db.refresh(sa)
         return sa, raw_key
 

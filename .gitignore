@@ -64,3 +64,6 @@ yaai/server/static
 # Todo
 TODOs.md
 .env.bak
+
+# Developer-specific
+.dev/

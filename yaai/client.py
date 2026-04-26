@@ -170,7 +170,11 @@ class YaaiClient:
 
     def _raise_for_status(self, response: httpx.Response) -> None:
         if response.is_error:
-            detail = response.json().get("detail", response.text)
+            try:
+                body = response.json()
+                detail = body.get("detail", response.text) if isinstance(body, dict) else response.text
+            except Exception:
+                detail = response.text
             raise httpx.HTTPStatusError(
                 f"{response.status_code}: {detail}",
                 request=response.request,
