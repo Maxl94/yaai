@@ -376,6 +376,46 @@ class TestClientErrorHandling:
         with pytest.raises(httpx.HTTPStatusError):
             await client.list_models()
 
+    async def test_raises_on_non_json_error_response(self):
+        """Client must raise HTTPStatusError even when the error body is not JSON."""
+
+        class HtmlErrorTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    502,
+                    content=b"<html><body>Bad Gateway</body></html>",
+                    headers={"content-type": "text/html"},
+                    request=request,
+                )
+
+        client = _make_client(MockTransport())
+        client._client = httpx.AsyncClient(
+            transport=HtmlErrorTransport(), base_url="http://test", headers={"X-API-Key": "yaam_test"}
+        )
+        with pytest.raises(httpx.HTTPStatusError, match="502"):
+            await client.list_models()
+
+    async def test_raises_on_empty_error_response(self):
+        """Client must raise HTTPStatusError even when the error body is empty."""
+
+        class EmptyErrorTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                return httpx.Response(500, content=b"", request=request)
+
+        client = _make_client(MockTransport())
+        client._client = httpx.AsyncClient(
+            transport=EmptyErrorTransport(), base_url="http://test", headers={"X-API-Key": "yaam_test"}
+        )
+        with pytest.raises(httpx.HTTPStatusError, match="500"):
+            await client.list_models()
+
+    async def test_raises_on_409_conflict(self):
+        transport = MockTransport()
+        transport.add_response("POST", "/models", 409, {"detail": "Model with this name already exists"})
+        client = _make_client(transport)
+        with pytest.raises(httpx.HTTPStatusError, match="409.*Model with this name already exists"):
+            await client.create_model("duplicate")
+
     def test_refresh_google_credentials_uses_token_when_id_token_attribute_is_missing(self):
         class ServiceAccountIDTokenCredentials:
             def __init__(self):

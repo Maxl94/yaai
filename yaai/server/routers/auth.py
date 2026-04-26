@@ -344,6 +344,8 @@ async def delete_user(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a user (owner only)."""
+    if str(user_id) == _identity.user_id:
+        raise HTTPException(status_code=403, detail="Cannot delete your own account")
     config = get_auth_config()
     svc = _get_service(db, config)
     deleted = await svc.delete_user(user_id)

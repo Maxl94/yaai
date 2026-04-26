@@ -15,7 +15,16 @@ async def test_create_model(client: AsyncClient):
 async def test_create_model_duplicate_name(client: AsyncClient):
     await create_model(client, name="duplicate")
     resp = await client.post("/api/v1/models", json={"name": "duplicate"})
-    assert resp.status_code == 500  # unique constraint violation
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["detail"]
+
+
+async def test_update_model_duplicate_name(client: AsyncClient):
+    await create_model(client, name="taken-name")
+    model_b = await create_model(client, name="other-name")
+    resp = await client.put(f"/api/v1/models/{model_b['id']}", json={"name": "taken-name"})
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["detail"]
 
 
 async def test_list_models(client: AsyncClient):
@@ -73,6 +82,23 @@ async def test_create_version(client: AsyncClient):
     assert len(version["schema_fields"]) == 3
     directions = {f["direction"] for f in version["schema_fields"]}
     assert directions == {"input", "output"}
+
+
+async def test_create_version_duplicate_label(client: AsyncClient):
+    model = await create_model(client, name="dup-version")
+    await create_version(client, model["id"])
+    resp = await client.post(
+        f"/api/v1/models/{model['id']}/versions",
+        json={
+            "version": "v1.0",
+            "schema": [
+                {"direction": "input", "field_name": "x", "data_type": "numerical"},
+                {"direction": "output", "field_name": "y", "data_type": "numerical"},
+            ],
+        },
+    )
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["detail"]
 
 
 async def test_create_version_no_output_field(client: AsyncClient):

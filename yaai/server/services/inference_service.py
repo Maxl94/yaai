@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.schemas.model import SchemaFieldCreate
@@ -202,7 +203,11 @@ class InferenceService(BaseService):
             timestamp=timestamp or datetime.now(UTC),
         )
         self.db.add(gt)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="Ground truth already exists for this inference") from None
         await self.db.refresh(gt)
         return gt
 
