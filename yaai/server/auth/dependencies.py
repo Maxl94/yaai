@@ -194,6 +194,18 @@ def require_owner(
     return identity
 
 
+def require_owner_or_service_account(
+    identity: CurrentIdentity = Depends(require_auth),
+) -> CurrentIdentity:
+    """Dependency that allows owners and service accounts, but denies viewers."""
+    config = get_auth_config()
+    if not config.enabled:
+        return identity
+    if not identity.is_owner and not identity.is_service_account:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Viewers cannot modify resources")
+    return identity
+
+
 async def require_model_write(
     model_id: uuid.UUID,
     identity: CurrentIdentity = Depends(require_auth),
@@ -317,6 +329,25 @@ async def check_model_read_access(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Service account not whitelisted for this model",
         )
+
+
+async def check_version_read_access(
+    model_id: uuid.UUID,
+    version_id: uuid.UUID,
+    identity: CurrentIdentity,
+    db: AsyncSession,
+) -> None:
+    """Check read access for a model and ensure the version belongs to it.
+
+    Use this for routes that take both IDs from the path but query by version_id,
+    so access granted on one model cannot be used to read another model's version.
+
+    Raises:
+        HTTPException: 403 if access is denied, 404 if the version does not belong to the model.
+    """
+    await check_model_read_access(model_id, identity, db)
+    if await resolve_model_id_from_version(version_id, db) != model_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model version not found")
 
 
 async def get_accessible_model_ids(

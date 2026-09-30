@@ -19,6 +19,13 @@ def _parse_comma_separated(v):
     return v
 
 
+# Public OAuth client IDs of the gcloud CLI (`print-identity-token`) and ADC (`application-default login`)
+GCLOUD_TOKEN_AUDIENCES = [
+    "32555940559.apps.googleusercontent.com",
+    "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
+]
+
+
 class JWTConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTH_JWT_", env_file=".env", extra="ignore")
 
@@ -47,11 +54,18 @@ class GoogleOAuthConfig(BaseSettings):
     default_role: str = "viewer"
     owner_emails: list[str] = []
     viewer_emails: list[str] = []
+    # Extra accepted `aud` values for Google user ID tokens (SDK/CLI); client_id is always accepted
+    token_audiences: list[str] = Field(default_factory=lambda: list(GCLOUD_TOKEN_AUDIENCES))
 
-    @field_validator("allowed_domains", "owner_emails", "viewer_emails", mode="before")
+    @field_validator("allowed_domains", "owner_emails", "viewer_emails", "token_audiences", mode="before")
     @classmethod
     def parse_comma_separated(cls, v):
         return _parse_comma_separated(v)
+
+    def accepted_token_audiences(self) -> list[str]:
+        """Return all audiences accepted for Google user ID tokens."""
+        client_id = self.client_id.get_secret_value()
+        return [aud for aud in [client_id, *self.token_audiences] if aud]
 
     def resolve_role(self, email: str) -> str | None:
         """Return role for an email, preferring explicit lists and falling back to default_role."""

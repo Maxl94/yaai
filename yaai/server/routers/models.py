@@ -26,6 +26,7 @@ from yaai.server.auth.dependencies import (
     require_auth,
     require_model_write,
     require_owner,
+    require_owner_or_service_account,
 )
 from yaai.server.database import get_db
 from yaai.server.models.auth import ModelAccess
@@ -55,7 +56,7 @@ async def list_models(
 @router.post("", status_code=201)
 async def create_model(
     data: ModelCreate,
-    identity: CurrentIdentity = Depends(require_auth),
+    identity: CurrentIdentity = Depends(require_owner_or_service_account),
     db: AsyncSession = Depends(get_db),
 ):
     svc = ModelService(db)

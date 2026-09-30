@@ -166,7 +166,7 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
         name=userinfo.get("name"),
     )
     if user is None:
-        raise HTTPException(status_code=403, detail="Your email domain is not allowed")
+        raise HTTPException(status_code=403, detail="Access denied")
 
     tokens = await svc.create_tokens(user)
 

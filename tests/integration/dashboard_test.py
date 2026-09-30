@@ -136,3 +136,12 @@ async def test_dashboard_not_found(client: AsyncClient):
         "/api/v1/models/00000000-0000-0000-0000-000000000000/versions/00000000-0000-0000-0000-000000000000/dashboard"
     )
     assert resp.status_code == 404
+
+
+async def test_dashboard_rejects_version_of_other_model(client: AsyncClient):
+    model_a = await create_model(client, name="model-a")
+    model_b = await create_model(client, name="model-b")
+    version_b = await create_version(client, model_b["id"])
+
+    resp = await client.get(f"/api/v1/models/{model_a['id']}/versions/{version_b['id']}/dashboard")
+    assert resp.status_code == 404

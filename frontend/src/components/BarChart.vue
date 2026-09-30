@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { use } from 'echarts/core'
+import { format, use } from 'echarts/core'
 import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -25,7 +25,7 @@ const option = computed(() => {
         const idx = params[0]?.dataIndex ?? 0
         const cat = categories[idx]
         if (!cat) return ''
-        return `${cat.value}<br/>Count: ${cat.count} (${cat.percentage.toFixed(1)}%)`
+        return `${format.encodeHTML(cat.value)}<br/>Count: ${cat.count} (${cat.percentage.toFixed(1)}%)`
       },
     },
     grid: {

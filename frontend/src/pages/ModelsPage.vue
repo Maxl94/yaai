@@ -3,9 +3,11 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { modelsApi } from '@/api/models'
 import CopyableId from '@/components/CopyableId.vue'
+import { useAuthStore } from '@/stores/auth'
 import type { Model } from '@/types'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const models = ref<Model[]>([])
 const loading = ref(true)
 const search = ref('')
@@ -119,6 +121,7 @@ onMounted(async () => {
         <p class="page-subtitle">Manage your ML models and monitor for data drift</p>
       </div>
       <v-btn
+        v-if="authStore.isOwner"
         color="primary"
         size="large"
         prepend-icon="mdi-plus"
@@ -237,6 +240,7 @@ onMounted(async () => {
         Create your first model to start monitoring for data drift
       </p>
       <v-btn
+        v-if="authStore.isOwner"
         color="primary"
         prepend-icon="mdi-plus"
         @click="showCreateDialog = true"

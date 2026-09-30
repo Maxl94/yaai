@@ -90,18 +90,8 @@ async def test_owner_can_create_model(owner_client: AsyncClient):
 
 
 async def test_viewer_cannot_create_model(owner_client: AsyncClient, viewer_client: AsyncClient):
-    # Viewer tries to create — blocked because create_model requires require_auth
-    # but the model router uses require_auth at router level; create uses require_auth only.
-    # Actually, create_model uses require_auth (any role), but the service account
-    # auto-grant logic means viewers CAN call it. Let's check:
-    # Looking at models.py line 56-58: create_model depends on require_auth (not require_owner).
-    # So viewers ARE allowed to create models. But wait -- per the plan, viewers should be
-    # blocked. Let me re-check... Actually, looking at the code, create_model indeed only
-    # uses require_auth. Viewers CAN create models. The plan assumed otherwise.
-    # Let me test what actually happens:
     resp = await viewer_client.post("/api/v1/models", json={"name": "viewer-model"})
-    # Per the code: create_model uses Depends(require_auth), so any authenticated user can create.
-    assert resp.status_code == 201
+    assert resp.status_code == 403
 
 
 async def test_sa_can_create_model(owner_client: AsyncClient, pg_session_factory: async_sessionmaker):
@@ -409,6 +399,97 @@ async def test_sa_without_access_cannot_log_inference(
 
     async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
         resp = await sa_client.post("/api/v1/inferences", json=_inference_payload(version["id"]))
+        assert resp.status_code == 403
+
+
+# Raw Inference Read Access
+
+
+async def test_owner_can_list_inferences(owner_client: AsyncClient):
+    model = await _create_model(owner_client, "list-infer-owner-model")
+    version = await _create_version(owner_client, model["id"])
+    await owner_client.post("/api/v1/inferences", json=_inference_payload(version["id"]))
+
+    resp = await owner_client.get("/api/v1/inferences", params={"model_version_id": version["id"]})
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["total"] == 1
+
+
+async def test_viewer_cannot_list_inferences(owner_client: AsyncClient, viewer_client: AsyncClient):
+    model = await _create_model(owner_client, "list-infer-viewer-model")
+    version = await _create_version(owner_client, model["id"])
+
+    resp = await viewer_client.get("/api/v1/inferences", params={"model_version_id": version["id"]})
+    assert resp.status_code == 403
+
+
+async def test_sa_with_access_cannot_list_inferences(owner_client: AsyncClient, pg_session_factory: async_sessionmaker):
+    sa_id, raw_key = await _create_sa(owner_client, "list-infer-sa")
+    model = await _create_model(owner_client, "list-infer-sa-model")
+    version = await _create_version(owner_client, model["id"])
+    await _grant_access(owner_client, model["id"], sa_id)
+
+    async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
+        resp = await sa_client.get("/api/v1/inferences", params={"model_version_id": version["id"]})
+        assert resp.status_code == 403
+
+
+# Version/Model Mismatch (access on model A must not expose model B's versions)
+
+
+def _version_read_paths(model_id: str, version_id: str) -> list[tuple[str, dict]]:
+    base = f"/api/v1/models/{model_id}/versions/{version_id}"
+    return [
+        (f"{base}/dashboard", {}),
+        (
+            f"{base}/dashboard/compare",
+            {"mode": "vs_reference", "from_a": "2020-01-01T00:00:00Z", "to_a": "2030-01-01T00:00:00Z"},
+        ),
+        (f"{base}/inference-volume", {}),
+        (f"{base}/drift-results", {}),
+        (f"{base}/jobs", {}),
+    ]
+
+
+async def test_sa_cannot_read_foreign_version_via_granted_model(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    sa_id, raw_key = await _create_sa(owner_client, "mismatch-sa")
+    model_a = await _create_model(owner_client, "mismatch-model-A")
+    await _create_version(owner_client, model_a["id"])
+    model_b = await _create_model(owner_client, "mismatch-model-B")
+    version_b = await _create_version(owner_client, model_b["id"])
+    await _grant_access(owner_client, model_a["id"], sa_id)
+
+    async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
+        for path, params in _version_read_paths(model_a["id"], version_b["id"]):
+            resp = await sa_client.get(path, params=params)
+            assert resp.status_code == 404, f"{path} returned {resp.status_code}"
+
+
+async def test_sa_can_read_own_version(owner_client: AsyncClient, pg_session_factory: async_sessionmaker):
+    sa_id, raw_key = await _create_sa(owner_client, "match-sa")
+    model = await _create_model(owner_client, "match-model")
+    version = await _create_version(owner_client, model["id"])
+    await _grant_access(owner_client, model["id"], sa_id)
+
+    async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
+        for path, params in _version_read_paths(model["id"], version["id"]):
+            resp = await sa_client.get(path, params=params)
+            assert resp.status_code == 200, f"{path} returned {resp.status_code}: {resp.text}"
+
+
+async def test_sa_without_access_gets_403_not_404_on_mismatch(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    """Access is checked before ownership so the response does not reveal version-model relations."""
+    _sa_id, raw_key = await _create_sa(owner_client, "mismatch-noaccess-sa")
+    model_a = await _create_model(owner_client, "mismatch-noaccess-A")
+    model_b = await _create_model(owner_client, "mismatch-noaccess-B")
+    version_b = await _create_version(owner_client, model_b["id"])
+
+    async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
+        resp = await sa_client.get(f"/api/v1/models/{model_a['id']}/versions/{version_b['id']}/dashboard")
         assert resp.status_code == 403
 
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { format } from 'echarts/core'
 import type { EChartsOption, SeriesOption } from 'echarts'
 import type { DriftResult } from '@/types'
 import { useECharts } from '@/composables/useECharts'
@@ -129,7 +130,7 @@ function buildChart() {
             const statusText = drifted ? 'Drift' : 'Stable'
             html += `<div style="display: flex; align-items: center; gap: 6px; margin: 3px 0;">
               <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${item.color};${drifted ? ' border: 2px solid #dc2626;' : ''}"></span>
-              <span style="flex: 1; color: #4b5563;">${item.seriesName}</span>
+              <span style="flex: 1; color: #4b5563;">${format.encodeHTML(item.seriesName)}</span>
               <span style="font-weight: 500;">${item.value[1].toFixed(4)}</span>
               <span style="font-size: 11px; font-weight: 500; color: ${statusColor};">${statusText}</span>
             </div>`

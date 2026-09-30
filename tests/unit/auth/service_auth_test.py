@@ -6,18 +6,23 @@ import pytest
 from pydantic import SecretStr
 
 from yaai.server.auth.config import (
+    GCLOUD_TOKEN_AUDIENCES,
     APIKeyServiceConfig,
     AuthConfig,
+    GoogleOAuthConfig,
     GoogleSAConfig,
     JWTConfig,
+    OAuthConfig,
     ServiceAccountsConfig,
 )
 from yaai.server.auth.service_auth import (
     _token_cache,
     _token_cache_key,
+    _user_token_cache,
     hash_api_key,
     validate_api_key,
     validate_google_sa_token,
+    validate_google_user_token,
 )
 
 
@@ -236,3 +241,73 @@ class TestValidateGoogleSaTokenAudience:
         db = AsyncMock()
         result = await validate_google_sa_token(config, "token", db)
         assert result is None
+
+
+class TestValidateGoogleUserToken:
+    @pytest.fixture(autouse=True)
+    def clear_cache(self):
+        _user_token_cache.clear()
+        yield
+        _user_token_cache.clear()
+
+    @pytest.fixture
+    def config(self):
+        return AuthConfig(
+            enabled=True,
+            jwt=JWTConfig(secret=SecretStr("test")),
+            oauth=OAuthConfig(
+                google=GoogleOAuthConfig(
+                    enabled=True,
+                    client_id=SecretStr("yaai-client-id"),
+                    owner_emails=["user@example.com"],
+                ),
+            ),
+        )
+
+    @staticmethod
+    def _db_with_user():
+        user = MagicMock()
+        user.id = "user-123"
+        user.role = "owner"
+        db = AsyncMock()
+        db_result = MagicMock()
+        db_result.scalar_one_or_none.return_value = user
+        db.execute.return_value = db_result
+        return db
+
+    @patch("yaai.server.auth.service_auth.google_id_token.verify_oauth2_token")
+    async def test_verifies_against_client_id_and_gcloud_audiences(self, mock_verify, config):
+        mock_verify.return_value = {"email": "user@example.com", "email_verified": True}
+
+        result = await validate_google_user_token(config, "token", self._db_with_user())
+
+        assert result is not None
+        assert result["user_id"] == "user-123"
+        audiences = mock_verify.call_args[0][2]
+        assert audiences == ["yaai-client-id", *GCLOUD_TOKEN_AUDIENCES]
+
+    @patch("yaai.server.auth.service_auth.google_id_token.verify_oauth2_token")
+    async def test_rejects_token_with_foreign_audience(self, mock_verify, config):
+        mock_verify.side_effect = ValueError("Token has wrong audience")
+
+        result = await validate_google_user_token(config, "token", self._db_with_user())
+
+        assert result is None
+
+    @patch("yaai.server.auth.service_auth.google_id_token.verify_oauth2_token")
+    async def test_rejects_unverified_email(self, mock_verify, config):
+        mock_verify.return_value = {"email": "user@example.com", "email_verified": False}
+
+        result = await validate_google_user_token(config, "token", self._db_with_user())
+
+        assert result is None
+
+    @patch("yaai.server.auth.service_auth.google_id_token.verify_oauth2_token")
+    async def test_rejects_when_no_audience_configured(self, mock_verify, config):
+        config.oauth.google.client_id = SecretStr("")
+        config.oauth.google.token_audiences = []
+
+        result = await validate_google_user_token(config, "token", self._db_with_user())
+
+        assert result is None
+        mock_verify.assert_not_called()

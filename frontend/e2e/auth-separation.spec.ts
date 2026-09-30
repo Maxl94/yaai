@@ -135,4 +135,9 @@ test.describe('Viewer UI', () => {
     await expect(page.locator('h1')).toContainText('Models', { timeout: 10000 })
     await expect(page.getByText('Settings', { exact: true })).not.toBeVisible()
   })
+
+  test('viewer does not see New Model button', async ({ page }) => {
+    await expect(page.getByText(seed.model_a.name)).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: /new model/i })).toHaveCount(0)
+  })
 })

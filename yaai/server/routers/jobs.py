@@ -8,6 +8,7 @@ from yaai.server.auth.dependencies import (
     CurrentIdentity,
     check_model_read_access,
     check_model_write_access,
+    check_version_read_access,
     get_accessible_model_ids,
     require_auth,
     resolve_model_id_from_job,
@@ -46,7 +47,7 @@ async def list_jobs_for_version(
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    await check_model_read_access(model_id, identity, db)
+    await check_version_read_access(model_id, version_id, identity, db)
     svc = JobService(db)
     jobs = await svc.list_jobs(version_id)
     return {"data": [JobConfigRead.model_validate(j) for j in jobs]}
@@ -155,7 +156,7 @@ async def list_drift_results(
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    await check_model_read_access(model_id, identity, db)
+    await check_version_read_access(model_id, version_id, identity, db)
     svc = JobService(db)
     results, total = await svc.list_drift_results(version_id, is_drifted, page, page_size)
     return {

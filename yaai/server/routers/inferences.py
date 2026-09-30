@@ -17,10 +17,11 @@ from yaai.schemas.inference import (
 )
 from yaai.server.auth.dependencies import (
     CurrentIdentity,
-    check_model_read_access,
     check_model_write_access,
+    check_version_read_access,
     require_auth,
     require_model_write,
+    require_owner,
     resolve_model_id_from_version,
 )
 from yaai.server.config import settings
@@ -70,11 +71,11 @@ async def list_inferences(
     to_ts: datetime | None = Query(None, alias="to"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    identity: CurrentIdentity = Depends(require_auth),
+    _identity: CurrentIdentity = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ):
-    model_id = await resolve_model_id_from_version(model_version_id, db)
-    await check_model_read_access(model_id, identity, db)
+    """List raw inference records (owner only, as records may contain sensitive data)."""
+    await resolve_model_id_from_version(model_version_id, db)
     svc = InferenceService(db)
     inferences, total = await svc.list_inferences(model_version_id, from_ts, to_ts, page, page_size)
     return {
@@ -93,7 +94,7 @@ async def get_inference_volume(
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    await check_model_read_access(model_id, identity, db)
+    await check_version_read_access(model_id, version_id, identity, db)
     svc = InferenceService(db)
     volume = await svc.get_inference_volume(version_id, bucket, from_ts, to_ts)
     return {"data": volume}

@@ -120,10 +120,6 @@ async def validate_google_sa_token(config: AuthConfig, token: str, db: AsyncSess
     if sa is None or not sa.is_active:
         return None
 
-    allowed = config.service_accounts.google.allowed_emails
-    if not email or (allowed and email not in allowed):
-        return None
-
     result = {
         "identity_type": "google_sa",
         "email": email,
@@ -135,6 +131,35 @@ async def validate_google_sa_token(config: AuthConfig, token: str, db: AsyncSess
 
 # Cache for user ID token validations (5 min TTL)
 _user_token_cache: TTLCache = TTLCache(maxsize=256, ttl=300)
+
+
+async def _verify_google_user_claims(config: AuthConfig, token: str) -> dict | None:
+    """Verify a Google user ID token and return its claims, or None if invalid.
+
+    The `aud` claim must match the configured OAuth client ID or one of the accepted
+    token audiences, so ID tokens issued to unrelated apps cannot be replayed here.
+    """
+    audiences = config.oauth.google.accepted_token_audiences()
+    if not audiences:
+        return None
+
+    loop = asyncio.get_running_loop()
+    try:
+        claims = await loop.run_in_executor(
+            None,
+            google_id_token.verify_oauth2_token,
+            token,
+            _google_auth_request,
+            audiences,
+        )
+    except ValueError as exc:
+        logger.debug("Google user ID token verification failed: %s", exc)
+        return None
+
+    if claims.get("email_verified") not in (True, "true"):
+        logger.debug("Google user ID token rejected: email not verified")
+        return None
+    return claims
 
 
 async def validate_google_user_token(config: AuthConfig, token: str, db: AsyncSession) -> dict | None:
@@ -153,24 +178,8 @@ async def validate_google_user_token(config: AuthConfig, token: str, db: AsyncSe
     if cached is not None:
         return cached
 
-    # User ID tokens from `gcloud auth print-identity-token` have Google's
-    # own OAuth client ID as audience (not the server URL), so we must
-    # skip audience validation.  Security comes from the email being in
-    # the User table + the token being cryptographically signed by Google.
-    loop = asyncio.get_running_loop()
-    try:
-        claims = await loop.run_in_executor(
-            None,
-            google_id_token.verify_oauth2_token,
-            token,
-            _google_auth_request,
-            None,  # no audience check for user tokens
-        )
-    except ValueError as exc:
-        logger.debug("Google user ID token verification failed: %s", exc)
-        return None
-
-    email = claims.get("email")
+    claims = await _verify_google_user_claims(config, token)
+    email = claims.get("email") if claims else None
     role = config.oauth.google.resolve_role(email) if email else None
     if not role:
         if email:

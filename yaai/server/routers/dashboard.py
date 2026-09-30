@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from yaai.server.auth.dependencies import CurrentIdentity, check_model_read_access, require_auth
+from yaai.server.auth.dependencies import CurrentIdentity, check_version_read_access, require_auth
 from yaai.server.database import get_db
 from yaai.server.schemas.dashboard import DashboardPanel, DashboardResponse
 from yaai.server.services.comparison_service import ComparisonService
@@ -22,7 +22,7 @@ async def get_dashboard(
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    await check_model_read_access(model_id, identity, db)
+    await check_version_read_access(model_id, version_id, identity, db)
     svc = DashboardService(db)
     panels = await svc.get_dashboard(version_id, from_ts, to_ts)
     return {
@@ -46,7 +46,7 @@ async def compare_dashboard(
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    await check_model_read_access(model_id, identity, db)
+    await check_version_read_access(model_id, version_id, identity, db)
     svc = ComparisonService(db)
     if mode == "vs_reference":
         if not from_a or not to_a:

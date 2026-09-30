@@ -164,46 +164,17 @@ class AuthService:
 
     async def get_or_create_google_user(self, email: str, google_sub: str, name: str | None = None) -> User | None:
         """Find or create a user from Google OAuth. Returns None if access denied."""
-        google_cfg = self.config.oauth.google
-
-        # Check allowed domains
-        if google_cfg.allowed_domains:
-            domain = email.rsplit("@", maxsplit=1)[1].lower() if "@" in email else ""
-            allowed_domains = {d.lower() for d in google_cfg.allowed_domains}
-            if domain not in allowed_domains:
-                return None
-
-        # Resolve role from email lists (None = access denied)
-        role = google_cfg.resolve_role(email)
+        role = self._resolve_google_role(email)
         if role is None:
             return None
 
-        # Try to find by google_sub first
-        stmt = select(User).where(User.google_sub == google_sub)
-        result = await self.db.execute(stmt)
-        user = result.scalar_one_or_none()
-        if user:
-            # Sync role with config on each login
-            if user.role != UserRole(role):
-                user.role = UserRole(role)
-                await self.db.commit()
-                await self.db.refresh(user)
-            return user
+        user = await self._find_google_user(google_sub, email)
+        if user is not None:
+            if not user.is_active:
+                return None
+            return await self._link_google_user(user, google_sub, UserRole(role))
 
-        # Try to find by email and link
-        stmt = select(User).where(User.email == email)
-        result = await self.db.execute(stmt)
-        user = result.scalar_one_or_none()
-        if user:
-            user.google_sub = google_sub
-            user.auth_provider = AuthProvider.GOOGLE
-            user.role = UserRole(role)
-            await self.db.commit()
-            await self.db.refresh(user)
-            return user
-
-        # Auto-create if enabled
-        if not google_cfg.auto_create_users:
+        if not self.config.oauth.google.auto_create_users:
             return None
 
         username = name or email.split("@", maxsplit=1)[0]
@@ -220,6 +191,35 @@ class AuthService:
             auth_provider=AuthProvider.GOOGLE,
             google_sub=google_sub,
         )
+
+    def _resolve_google_role(self, email: str) -> str | None:
+        """Return the role for a Google email, or None if its domain or email is not allowed."""
+        google_cfg = self.config.oauth.google
+        if google_cfg.allowed_domains:
+            domain = email.rsplit("@", maxsplit=1)[1].lower() if "@" in email else ""
+            if domain not in {d.lower() for d in google_cfg.allowed_domains}:
+                return None
+        return google_cfg.resolve_role(email)
+
+    async def _find_google_user(self, google_sub: str, email: str) -> User | None:
+        """Find a user by Google subject, falling back to email for first-time linking."""
+        result = await self.db.execute(select(User).where(User.google_sub == google_sub))
+        user = result.scalar_one_or_none()
+        if user is None:
+            result = await self.db.execute(select(User).where(User.email == email))
+            user = result.scalar_one_or_none()
+        return user
+
+    async def _link_google_user(self, user: User, google_sub: str, role: UserRole) -> User:
+        """Link the user to the Google account and sync the role from config."""
+        if user.google_sub == google_sub and user.role == role:
+            return user
+        user.google_sub = google_sub
+        user.auth_provider = AuthProvider.GOOGLE
+        user.role = role
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
 
     # ── Service accounts ─────────────────────────────────────────────
 

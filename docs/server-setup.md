@@ -148,6 +148,10 @@ AUTH_OAUTH_GOOGLE_VIEWER_EMAILS=user@example.com
 Users from `AUTH_OAUTH_GOOGLE_ALLOWED_DOMAINS` who are not in those lists are assigned
 `AUTH_OAUTH_GOOGLE_DEFAULT_ROLE` (defaults to `viewer`).
 
+Existing Google users can also call the API directly (SDK or `gcloud auth print-identity-token`) with a Google ID token.
+The token's audience must be the OAuth client ID or one of `AUTH_OAUTH_GOOGLE_TOKEN_AUDIENCES`, which defaults
+to the public gcloud CLI and Application Default Credentials client IDs. Tokens issued to any other application are rejected.
+
 > [!IMPORTANT]
 > When Google OAuth is enabled, local username/password authentication is automatically disabled. Users must sign in with their Google account.
 
