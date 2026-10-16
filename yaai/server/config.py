@@ -3,11 +3,52 @@
 import logging
 import os
 import re
+import secrets
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
+
+
+def is_production() -> bool:
+    """Return True if ENVIRONMENT is set to 'production' or 'prod'."""
+    return os.environ.get("ENVIRONMENT", "development").lower() in ("production", "prod")
+
+
+_INSECURE_SESSION_SECRETS = {"", "dev-session-secret-change-me"}
+
+
+def api_docs_enabled() -> bool:
+    """Return whether /docs, /redoc and /openapi.json are exposed.
+
+    Controlled by API_DOCS_ENABLED; defaults to enabled outside production and disabled in production.
+    """
+    value = os.environ.get("API_DOCS_ENABLED")
+    if value is None or not value.strip():
+        return not is_production()
+    return value.strip().lower() in ("true", "1", "yes")
+
+
+def resolve_session_secret() -> str:
+    """Return the session middleware secret from SESSION_SECRET.
+
+    Raises:
+        RuntimeError: In production when SESSION_SECRET is missing or a known default.
+    """
+    secret = os.environ.get("SESSION_SECRET", "")
+    if secret not in _INSECURE_SESSION_SECRETS:
+        return secret
+    if is_production():
+        raise RuntimeError(
+            "FATAL: SESSION_SECRET must be set in production; multiple instances and restarts need a shared "
+            "secret. Generate one with: openssl rand -base64 32"
+        )
+    logger.warning(
+        "SESSION_SECRET not configured — generated ephemeral secret. "
+        "OAuth state will NOT survive restarts. Set SESSION_SECRET for persistence."
+    )
+    return secrets.token_urlsafe(32)
 
 
 class Settings(BaseSettings):
@@ -49,8 +90,7 @@ settings = Settings()
 
 # Warn about default DB credentials (skip when Cloud SQL connector is used)
 if "changeme" in settings.database_url and not settings.cloud_sql_instance:
-    _is_prod = os.environ.get("ENVIRONMENT", "development").lower() in ("production", "prod")
-    if _is_prod:
+    if is_production():
         raise RuntimeError(
             "FATAL: Database URL contains default credentials. Set DATABASE_URL with secure credentials."
         )

@@ -25,7 +25,7 @@ docker compose up -d
 
 This starts PostgreSQL and the YAAI server. Open [http://localhost:8000](http://localhost:8000) -- you should see the login screen.
 
-Default login: `admin` / check the server logs for the generated password.
+Default login: `admin` / the generated initial password is stored in a file readable only by the server user (never logged): `docker compose exec backend cat /home/appuser/admin-initial-password.txt`. Or set `BOOTSTRAP_ADMIN_PASSWORD` (min. 12 characters) in `.env` before the first start.
 
 > [!TIP]
 > For step-by-step server configuration, environment variables, and authentication setup, see:

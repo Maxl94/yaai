@@ -38,7 +38,7 @@ docker compose up -d
 
 Open **http://localhost:8000** — the server and frontend are ready.
 
-Default login: `admin` / check the server logs for the generated password.
+Default login: `admin` / the generated initial password is stored in a file readable only by the server user (never logged): `docker compose exec backend cat /home/appuser/admin-initial-password.txt`. Or set `BOOTSTRAP_ADMIN_PASSWORD` (min. 12 characters) in `.env` before the first start.
 
 For detailed setup instructions, see the **[Server Setup Guide](https://maxl94.github.io/yaai/server-setup/)** (development) or the **[Deployment Guide](https://maxl94.github.io/yaai/deployment/)** (production).
 

@@ -61,8 +61,17 @@ Edit `.env` and set the values below. The defaults work for local development wi
 
 | Variable | Default | Description |
 |---|---|---|
-| `AUTH_JWT_SECRET` | *(auto-generated)* | Secret for signing JWT tokens. If not set, an ephemeral secret is generated on startup (sessions won't survive restarts). Generate with `openssl rand -base64 32`. |
-| `SESSION_SECRET` | *(auto-generated)* | Secret for session middleware (OAuth state). Same behavior as JWT secret. |
+| `AUTH_JWT_SECRET` | *(auto-generated in development)* | Secret for signing JWT tokens. In development an ephemeral secret is generated if unset (sessions won't survive restarts). **Required when `ENVIRONMENT=production`** -- the server refuses to start without it. Generate with `openssl rand -base64 32`. |
+| `SESSION_SECRET` | *(auto-generated in development)* | Secret for session middleware (OAuth state). Same behavior as the JWT secret, including the production requirement. |
+| `BOOTSTRAP_ADMIN_PASSWORD` | *(generated)* | Initial password of the `admin` account (min. 12 characters). If unset, one is generated and written to `BOOTSTRAP_ADMIN_PASSWORD_FILE`. |
+| `BOOTSTRAP_ADMIN_PASSWORD_FILE` | `./admin-initial-password.txt` | Where the generated initial admin password is stored (new file, mode `0600`, never overwritten). |
+| `API_DOCS_ENABLED` | `true` (development) / `false` (production) | Expose Swagger UI (`/docs`), ReDoc (`/redoc`) and `/openapi.json`. |
+| `SECURITY_HEADERS_ENABLED` | `true` | Add security headers (CSP, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS over HTTPS). |
+| `RATE_LIMIT_ENABLED` | `true` | Enable rate limiting. |
+| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `0` | Number of trusted reverse proxies in front of the server. When > 0 the client IP is read from `X-Forwarded-For` (N-th entry from the right). Set to `1` on Cloud Run accessed directly, typically `2` behind an external HTTPS load balancer; otherwise all users share the proxy IP. |
+| `RATE_LIMIT_STORAGE_URI` | `memory://` | Rate limit counter storage (e.g. `redis://host:6379`). The default is per instance; see [Running multiple instances](deployment.md#running-multiple-instances). |
+| `SCHEDULER_ENABLED` | `true` | Run the drift job scheduler in this instance. Use `false` for API-only instances. |
+| `SCHEDULER_SYNC_INTERVAL_SECONDS` | `60` | How often the scheduler reloads active jobs from the database (picks up job changes made on other instances). |
 | `CORS_ALLOWED_ORIGINS` | *(derived from BASE_URL)* | Comma-separated allowed CORS origins. Only set if you need origins different from BASE_URL. |
 | `ENVIRONMENT` | `development` | Set to `production` to enforce secure credentials |
 | `AUTH_ENABLED` | `true` | Master auth switch |
@@ -76,7 +85,7 @@ Edit `.env` and set the values below. The defaults work for local development wi
 > - **Local auth** — enabled automatically unless Google OAuth is configured
 > - **CORS origins** — defaults to `BASE_URL`
 > - **SA audience** — defaults to `BASE_URL`
-> - **Admin password** — auto-generated and logged on first startup
+> - **Admin password** — auto-generated and written to a 0600 file on first startup (never logged)
 > - **JWT algorithm** — hardcoded to HS256 (not configurable)
 > - **Token expiry** — hardcoded to 60 min (access) / 30 days (refresh)
 
@@ -96,11 +105,11 @@ uv run uvicorn yaai.server.main:app --reload --reload-dir yaai --host 0.0.0.0 --
 
 On startup, the server checks that the database schema is at the latest migration and exits with an error if it is not. On first startup, it will also:
 
-1. **Create a default admin account** with the username `admin` and a randomly generated password (check the server logs for the password)
+1. **Create a default admin account** with the username `admin` and a randomly generated password (written to a file, see [Default admin account](#default-admin-account))
 
 Open **http://localhost:8000** -- you should see the login screen.
 
-API docs are available at **http://localhost:8000/docs** (Swagger UI).
+API docs are available at **http://localhost:8000/docs** (Swagger UI) in development. They are disabled by default when `ENVIRONMENT=production` (see `API_DOCS_ENABLED`).
 
 ## 5. Start the frontend (development only)
 
@@ -124,9 +133,9 @@ Out of the box, the server uses **local authentication** (username + password) w
 On first startup (when no users exist), the server creates an admin account:
 
 - **Username**: `admin`
-- **Password**: randomly generated -- check the server logs for the password
+- **Password**: `BOOTSTRAP_ADMIN_PASSWORD` if set (at least 12 characters, otherwise the server refuses to start). Otherwise a random password is generated and written to `BOOTSTRAP_ADMIN_PASSWORD_FILE` (default `./admin-initial-password.txt` in the server's working directory) with permissions `0600`. The password is never written to the log; only the file path is. If the file cannot be created (not writable, or it already exists), the password is printed once to stderr with a warning -- in containers stderr is usually the log stream, so set `BOOTSTRAP_ADMIN_PASSWORD` or a writable `BOOTSTRAP_ADMIN_PASSWORD_FILE` instead. The admin account is only created after the password has been delivered.
 
-Change the password immediately after first login.
+Change the password immediately after first login and delete the file. With the repo's `docker compose`, the file lives in the container: `docker compose exec backend cat /home/appuser/admin-initial-password.txt`.
 
 ### API keys
 
