@@ -1,5 +1,6 @@
 """Unit tests for the YaaiClient SDK."""
 
+import json
 import uuid
 
 import httpx
@@ -207,6 +208,97 @@ class TestClientModels:
         result = await client.list_models()
         assert len(result) == 1
         assert result[0].name == "m1"
+
+    async def test_create_model_sends_project_id(self):
+        transport = MockTransport()
+        project_id = uuid.uuid4()
+        transport.add_response(
+            "POST",
+            "/models",
+            201,
+            {
+                "data": {
+                    "id": str(uuid.uuid4()),
+                    "name": "scoped",
+                    "description": None,
+                    "project_id": str(project_id),
+                    "project_name": "team-a",
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "versions": [],
+                }
+            },
+        )
+        client = _make_client(transport)
+
+        result = await client.create_model("scoped", project_id=project_id)
+
+        assert json.loads(transport.requests[0].content)["project_id"] == str(project_id)
+        assert result.project_id == project_id
+        assert result.project_name == "team-a"
+
+    async def test_create_model_without_project_sends_null_project(self):
+        transport = MockTransport()
+        transport.add_response(
+            "POST",
+            "/models",
+            201,
+            {
+                "data": {
+                    "id": str(uuid.uuid4()),
+                    "name": "legacy",
+                    "description": None,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "versions": [],
+                }
+            },
+        )
+        client = _make_client(transport)
+
+        result = await client.create_model("legacy")
+
+        assert json.loads(transport.requests[0].content)["project_id"] is None
+        assert result.project_id is None
+
+    async def test_list_models_filters_by_project(self):
+        transport = MockTransport()
+        project_id = uuid.uuid4()
+        transport.add_response("GET", f"/models?project_id={project_id}", 200, {"data": []})
+        client = _make_client(transport)
+
+        assert await client.list_models(project_id=project_id) == []
+        assert transport.requests[0].url.params["project_id"] == str(project_id)
+
+    async def test_list_projects(self):
+        transport = MockTransport()
+        project_id = str(uuid.uuid4())
+        transport.add_response(
+            "GET",
+            "/projects",
+            200,
+            {
+                "data": [
+                    {
+                        "id": project_id,
+                        "name": "default",
+                        "description": None,
+                        "is_default": True,
+                        "model_count": 3,
+                        "my_role": "editor",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z",
+                    }
+                ]
+            },
+        )
+        client = _make_client(transport)
+
+        projects = await client.list_projects()
+
+        assert [(str(p.id), p.name, p.my_role, p.model_count) for p in projects] == [
+            (project_id, "default", "editor", 3)
+        ]
 
     async def test_delete_model(self):
         transport = MockTransport()
