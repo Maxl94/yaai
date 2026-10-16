@@ -21,7 +21,8 @@ from yaai.server.auth.oauth import get_oauth
 from yaai.server.auth.passwords import verify_password
 from yaai.server.config import settings
 from yaai.server.database import get_db
-from yaai.server.models.auth import ModelAccess
+from yaai.server.models.auth import ModelAccess, ServiceAccount, UserRole
+from yaai.server.models.model import Model
 from yaai.server.rate_limit import limiter
 from yaai.server.schemas.auth import (
     AuthConfigResponse,
@@ -271,11 +272,16 @@ async def change_my_password(
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if user.hashed_password and not verify_password(data.current_password, user.hashed_password):
+    if not user.hashed_password:
+        raise HTTPException(
+            status_code=400, detail="Password login is not available for accounts without a local password"
+        )
+    if not verify_password(data.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
+    # Also revokes all refresh tokens: every session must re-authenticate once its access token expires
     await svc.change_password(user, data.new_password)
-    return {"data": {"message": "Password changed successfully"}}
+    return {"data": {"message": "Password changed successfully. Please log in again."}}
 
 
 # Owner: User management
@@ -325,10 +331,15 @@ async def create_user(
 async def update_user(
     user_id: uuid.UUID,
     data: UserUpdate,
-    _identity: CurrentIdentity = Depends(require_owner),
+    identity: CurrentIdentity = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a user (owner only)."""
+    """Update a user (owner only). Owners cannot deactivate or downgrade themselves."""
+    if str(user_id) == identity.user_id:
+        if data.is_active is False:
+            raise HTTPException(status_code=403, detail="Cannot deactivate your own account")
+        if data.role is not None and data.role != UserRole.OWNER:
+            raise HTTPException(status_code=403, detail="Cannot change your own role")
     config = get_auth_config()
     svc = _get_service(db, config)
     user = await svc.update_user(user_id, **data.model_dump(exclude_unset=True))
@@ -467,6 +478,11 @@ async def delete_service_account(
 # Owner: Model access management
 
 
+async def _get_model_or_404(db: AsyncSession, model_id: uuid.UUID) -> None:
+    if await db.get(Model, model_id) is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+
 @router.get("/models/{model_id}/access")
 async def list_model_access(
     model_id: uuid.UUID,
@@ -474,6 +490,7 @@ async def list_model_access(
     db: AsyncSession = Depends(get_db),
 ):
     """List service accounts with access to a model (owner only)."""
+    await _get_model_or_404(db, model_id)
     stmt = select(ModelAccess).where(ModelAccess.model_id == model_id)
     result = await db.execute(stmt)
     entries = list(result.scalars().all())
@@ -488,6 +505,10 @@ async def grant_model_access(
     db: AsyncSession = Depends(get_db),
 ):
     """Grant a service account access to a model (owner only)."""
+    await _get_model_or_404(db, model_id)
+    if await db.get(ServiceAccount, data.service_account_id) is None:
+        raise HTTPException(status_code=404, detail="Service account not found")
+
     # Check if access already exists
     stmt = select(ModelAccess).where(
         ModelAccess.model_id == model_id,

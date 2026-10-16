@@ -7,7 +7,20 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from yaai.server.database import Base, UUIDMixin
@@ -94,3 +107,25 @@ class Notification(UUIDMixin, Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     is_read: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NotificationReadReceipt(UUIDMixin, Base):
+    """Records that a user or service account has read a notification."""
+
+    __tablename__ = "notification_reads"
+    __table_args__ = (
+        CheckConstraint("(user_id IS NULL) <> (service_account_id IS NULL)", name="ck_notification_reads_one_reader"),
+        # reader column first so the unique indexes also serve the ON DELETE CASCADE lookups
+        UniqueConstraint("user_id", "notification_id", name="uq_notification_reads_user"),
+        UniqueConstraint("service_account_id", "notification_id", name="uq_notification_reads_sa"),
+        Index("ix_notification_reads_notification", "notification_id"),
+    )
+
+    notification_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    service_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("service_accounts.id", ondelete="CASCADE"), nullable=True
+    )
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

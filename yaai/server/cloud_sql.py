@@ -5,9 +5,11 @@ Requires the 'gcp' extra: pip install "yaai-monitoring[gcp]"
 """
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from google.cloud.sql.connector import Connector, IPTypes, create_async_connector
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 
 from yaai.server.config import settings
 
@@ -53,14 +55,17 @@ class CloudSQLConnector:
         )
 
     @staticmethod
-    def create_sync_engine():
-        """Create a sync SQLAlchemy engine with its own Connector.
+    @contextmanager
+    def sync_engine() -> Iterator[Engine]:
+        """Yield a sync SQLAlchemy engine backed by its own Connector.
 
-        Intended for one-off tasks like migrations. Uses a standalone
-        Connector so it never interferes with the async Connector's event loop.
+        Intended for one-off tasks like migrations and the startup schema check. Uses a
+        standalone Connector so it never interferes with the async Connector's event loop.
+        The engine is disposed and the Connector (including its background thread) is
+        closed when the context exits.
         """
         ip_type = _IP_TYPE_MAP.get(settings.cloud_sql_ip_type.lower(), IPTypes.PUBLIC)
-        connector = Connector()
+        connector = Connector(refresh_strategy="LAZY")
 
         def _creator():
             return connector.connect(
@@ -72,4 +77,9 @@ class CloudSQLConnector:
                 ip_type=ip_type,
             )
 
-        return create_engine("postgresql+pg8000://", creator=_creator)
+        engine = create_engine("postgresql+pg8000://", creator=_creator)
+        try:
+            yield engine
+        finally:
+            engine.dispose()
+            connector.close()

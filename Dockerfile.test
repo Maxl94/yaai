@@ -8,6 +8,11 @@
 #
 # Then build and run the image:
 # docker build -f Dockerfile.test -t yaai-monitoring-test .
+#
+# The server does not migrate the database on startup. Apply the migrations first
+# (against a reachable PostgreSQL), then start the server:
+# docker run --rm -e DATABASE_URL=... yaai-monitoring-test python -m yaai.server.migrate
+# docker run --rm -p 8000:8000 -e DATABASE_URL=... yaai-monitoring-test
 
 FROM python:3.12-slim
 

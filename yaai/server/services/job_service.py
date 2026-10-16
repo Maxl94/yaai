@@ -1,18 +1,21 @@
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import Uuid, exists, func, literal, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from yaai.server.drift.registry import get_metric
 from yaai.server.models.inference import InferenceData
-from yaai.server.models.job import DriftResult, JobConfig, JobRun, Notification
+from yaai.server.models.job import DriftResult, JobConfig, JobRun, Notification, NotificationReadReceipt
 from yaai.server.models.model import Model, ModelVersion, SchemaField
 from yaai.server.scheduler import register_job
-from yaai.server.schemas.job import UNSET, JobConfigUpdate
+from yaai.server.schemas.job import UNSET, JobConfigUpdate, NotificationRead
 from yaai.server.services.utils.pagination import paginate_query
 
 
@@ -30,6 +33,22 @@ class DriftResultEnriched:
     is_drifted: bool
     details: dict | None
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class NotificationReader:
+    """Identity whose notification read state is tracked (a user or a service account)."""
+
+    kind: Literal["user", "service_account"]
+    id: uuid.UUID
+    created_at: datetime
+
+    @property
+    def column(self):
+        """Column of notification_reads that holds this reader's ID."""
+        if self.kind == "user":
+            return NotificationReadReceipt.user_id
+        return NotificationReadReceipt.service_account_id
 
 
 class JobService:
@@ -296,11 +315,26 @@ class JobService:
         page: int = 1,
         page_size: int = 20,
         model_ids: list[uuid.UUID] | None = None,
-    ):
-        """List notifications with optional read-status and model-version filters."""
-        query = select(Notification)
+        reader: NotificationReader | None = None,
+    ) -> tuple[list[NotificationRead], int]:
+        """List notifications with optional read-status and model-version filters.
+
+        Args:
+            is_read: Filter by the read state of the given reader.
+            model_version_id: Restrict to one model version.
+            page: 1-based page number.
+            page_size: Maximum number of results per page.
+            model_ids: Restrict to these models (None means no restriction).
+            reader: Whose read state to report. None uses the global ``Notification.is_read`` flag
+                (authentication disabled). Notifications older than the reader count as read.
+
+        Returns:
+            Tuple of (notifications with the reader's read state, total count).
+        """
+        read_expr = self._read_expr(reader)
+        query = select(Notification, read_expr.label("reader_is_read"))
         if is_read is not None:
-            query = query.where(Notification.is_read == is_read)
+            query = query.where(read_expr if is_read else ~read_expr)
         if model_version_id is not None:
             query = query.where(Notification.model_version_id == model_version_id)
         if model_ids is not None:
@@ -309,33 +343,78 @@ class JobService:
             )
 
         query = query.order_by(Notification.created_at.desc())
-        return await paginate_query(self.db, query, page, page_size)
+        rows, total = await paginate_query(self.db, query, page, page_size, as_rows=True)
+        return [self._to_read_schema(n, bool(read)) for n, read in rows], total
 
-    async def mark_notification_read(self, notification_id: uuid.UUID) -> Notification:
-        """Mark a single notification as read."""
+    @staticmethod
+    def _read_expr(reader: NotificationReader | None):
+        """SQL expression for the read state of a notification as seen by the reader.
+
+        Notifications created before the reader existed count as read, so new readers do not start with the
+        historic backlog as unread.
+        """
+        if reader is None:
+            return Notification.is_read
+        has_receipt = exists().where(
+            NotificationReadReceipt.notification_id == Notification.id, reader.column == reader.id
+        )
+        return or_(Notification.created_at < reader.created_at, has_receipt)
+
+    @staticmethod
+    def _to_read_schema(notification: Notification, is_read: bool) -> NotificationRead:
+        """Build the response schema without touching the ORM object's global is_read flag."""
+        data = NotificationRead.model_validate(notification)
+        return data.model_copy(update={"is_read": is_read})
+
+    def _insert_fn(self):
+        """Dialect-specific INSERT construct that supports ON CONFLICT DO NOTHING."""
+        return pg_insert if self.db.get_bind().dialect.name == "postgresql" else sqlite_insert
+
+    async def get_notification(self, notification_id: uuid.UUID) -> Notification:
+        """Fetch a notification by ID or raise 404."""
         result = await self.db.execute(select(Notification).where(Notification.id == notification_id))
         notification = result.scalar_one_or_none()
         if not notification:
             raise HTTPException(status_code=404, detail="Notification not found")
-        notification.is_read = True
-        await self.db.commit()
-        await self.db.refresh(notification)
         return notification
 
-    async def mark_all_notifications_read(self, *, model_ids: list[uuid.UUID] | None = None) -> int:
-        """Mark all unread notifications as read. Returns the count updated."""
-        stmt = select(Notification).where(Notification.is_read == False)  # noqa: E712
-        if model_ids is not None:
-            stmt = (
-                stmt.join(DriftResult, Notification.drift_result_id == DriftResult.id)
-                .join(JobRun, DriftResult.job_run_id == JobRun.id)
-                .join(JobConfig, JobRun.job_config_id == JobConfig.id)
-                .join(ModelVersion, JobConfig.model_version_id == ModelVersion.id)
-                .where(ModelVersion.model_id.in_(model_ids))
-            )
-        result = await self.db.execute(stmt)
-        notifications = result.scalars().all()
-        for n in notifications:
-            n.is_read = True
+    async def mark_notification_read(
+        self, notification: Notification, reader: NotificationReader | None = None
+    ) -> NotificationRead:
+        """Mark a single, already loaded notification as read for the reader (idempotent)."""
+        if reader is None:
+            notification.is_read = True
+        else:
+            row = {"id": uuid.uuid4(), "notification_id": notification.id, reader.column.key: reader.id}
+            await self.db.execute(self._insert_fn()(NotificationReadReceipt).values(row).on_conflict_do_nothing())
+        result = self._to_read_schema(notification, True)
         await self.db.commit()
-        return len(notifications)
+        return result
+
+    async def mark_all_notifications_read(
+        self, *, model_ids: list[uuid.UUID] | None = None, reader: NotificationReader | None = None
+    ) -> int:
+        """Mark all unread notifications as read for the reader with one set-based statement.
+
+        Returns:
+            Number of notifications newly marked as read.
+        """
+        unread = ~self._read_expr(reader)
+        if model_ids is not None:
+            accessible_versions = select(ModelVersion.id).where(ModelVersion.model_id.in_(model_ids))
+            unread = unread & Notification.model_version_id.in_(accessible_versions)
+
+        if reader is None:
+            result = await self.db.execute(update(Notification).where(unread).values(is_read=True))
+        else:
+            is_postgres = self.db.get_bind().dialect.name == "postgresql"
+            new_id = func.gen_random_uuid() if is_postgres else func.lower(func.hex(func.randomblob(16)))
+            source = select(new_id, Notification.id, literal(reader.id, Uuid())).where(unread)
+            stmt = (
+                self._insert_fn()(NotificationReadReceipt)
+                .from_select(["id", "notification_id", reader.column.key], source)
+                .on_conflict_do_nothing()
+            )
+            result = await self.db.execute(stmt)
+        await self.db.commit()
+        return result.rowcount
