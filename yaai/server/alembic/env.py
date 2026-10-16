@@ -7,7 +7,7 @@ from sqlalchemy import engine_from_config, pool
 from yaai.server.database import Base
 
 # Import all models so they register with Base.metadata
-from yaai.server.models import auth, inference, job, model  # noqa: F401
+from yaai.server.models import auth, inference, job, model, project  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
