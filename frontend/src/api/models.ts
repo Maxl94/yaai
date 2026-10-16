@@ -1,8 +1,8 @@
 import client from './client'
 import type { Model, ModelVersion, SchemaFieldCreate, DriftResult, InferenceVolumeBucket, ApiResponse, PaginatedResponse } from '@/types'
 
-async function list(): Promise<Model[]> {
-  const response = await client.get<PaginatedResponse<Model>>('/models')
+async function list(params: { project_id?: string } = {}): Promise<Model[]> {
+  const response = await client.get<PaginatedResponse<Model>>('/models', { params })
   return response.data.data
 }
 
@@ -11,12 +11,15 @@ async function get(modelId: string): Promise<Model> {
   return response.data.data
 }
 
-async function create(data: { name: string; description?: string }): Promise<Model> {
+async function create(data: { name: string; description?: string; project_id?: string }): Promise<Model> {
   const response = await client.post<ApiResponse<Model>>('/models', data)
   return response.data.data
 }
 
-async function update(modelId: string, data: { name?: string; description?: string }): Promise<Model> {
+async function update(
+  modelId: string,
+  data: { name?: string; description?: string; project_id?: string },
+): Promise<Model> {
   const response = await client.put<ApiResponse<Model>>(`/models/${modelId}`, data)
   return response.data.data
 }

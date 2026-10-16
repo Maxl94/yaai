@@ -4,11 +4,15 @@ import { useRouter, useRoute } from 'vue-router'
 import { useTheme } from 'vuetify'
 import { notificationsApi } from '@/api/notifications'
 import { useAuthStore } from '@/stores/auth'
+import { useProjectsStore } from '@/stores/projects'
 
 const router = useRouter()
 const route = useRoute()
 const theme = useTheme()
 const authStore = useAuthStore()
+const projectsStore = useProjectsStore()
+
+const ALL_PROJECTS = '__all__'
 
 const rail = ref(true)
 const unreadCount = ref(0)
@@ -25,6 +29,16 @@ function handleLogout() {
   router.push('/login')
 }
 
+const projectItems = computed(() => [
+  { title: 'All projects', value: ALL_PROJECTS },
+  ...projectsStore.projects.map((p) => ({ title: p.name, value: p.id })),
+])
+
+const selectedProject = computed({
+  get: () => projectsStore.currentProjectId ?? ALL_PROJECTS,
+  set: (value: string) => projectsStore.setCurrentProject(value === ALL_PROJECTS ? null : value),
+})
+
 const navigationItems = computed(() => {
   const items = [
     { title: 'Models', icon: 'mdi-cube-outline', to: '/models', description: 'ML models & versions' },
@@ -32,6 +46,9 @@ const navigationItems = computed(() => {
     { title: 'Drift', icon: 'mdi-chart-timeline-variant-shimmer', to: '/drift', description: 'Detection results' },
     { title: 'Alerts', icon: 'mdi-bell-ring-outline', to: '/notifications', description: 'Notifications' },
   ]
+  if (authStore.authEnabled) {
+    items.push({ title: 'Projects', icon: 'mdi-folder-multiple-outline', to: '/projects', description: 'Access & members' })
+  }
   if (authStore.isOwner) {
     items.push({ title: 'Settings', icon: 'mdi-cog-outline', to: '/settings', description: 'Users & access' })
   }
@@ -47,6 +64,7 @@ async function fetchUnreadCount() {
 }
 
 onMounted(() => {
+  projectsStore.ensureLoaded()
   fetchUnreadCount()
   pollInterval = window.setInterval(fetchUnreadCount, 30000)
 })
@@ -150,6 +168,20 @@ onUnmounted(() => {
       </template>
     </v-navigation-drawer>
 
+    <v-app-bar v-if="projectsStore.projects.length > 0" flat density="compact" class="top-bar">
+      <v-spacer />
+      <v-select
+        v-model="selectedProject"
+        :items="projectItems"
+        label="Project"
+        prepend-inner-icon="mdi-folder-outline"
+        density="compact"
+        hide-details
+        class="project-switcher mr-6"
+        data-testid="project-switcher"
+      />
+    </v-app-bar>
+
     <!-- Main Content Area -->
     <v-main class="main-content">
       <div class="content-wrapper">
@@ -227,6 +259,15 @@ onUnmounted(() => {
 .nav-subtitle {
   font-size: 0.75rem;
   opacity: 0.6;
+}
+
+.top-bar {
+  background: rgb(var(--v-theme-background)) !important;
+  border-bottom: 1px solid rgba(var(--v-border-color), 0.08);
+}
+
+.project-switcher {
+  max-width: 280px;
 }
 
 .main-content {
