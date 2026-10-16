@@ -11,6 +11,7 @@ frontend can render a true linear x-axis.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -21,12 +22,7 @@ DEFAULT_NUM_BINS = 20
 LOWER_PERCENTILE = 1.0
 UPPER_PERCENTILE = 99.0
 TAIL_FACTOR = 0.5
-_SIGNIFICANT_DIGITS = 6
-
-
-def round_edge(value: float) -> float:
-    """Round an edge to a fixed number of significant digits (safe for tiny and huge ranges)."""
-    return float(f"{value:.{_SIGNIFICANT_DIGITS}g}")
+_WIDTH_DIGITS = 4
 
 
 @dataclass(frozen=True)
@@ -61,6 +57,22 @@ class BinSpec:
     def has_overflow(self) -> bool:
         """True if values above ``upper`` exist."""
         return self.data_max > self.upper
+
+    @property
+    def edge_decimals(self) -> int | None:
+        """Decimals that keep ``_WIDTH_DIGITS`` significant digits of the bin width (None for a zero-width bin).
+
+        Rounding relative to the bin width, not the value, keeps edges distinct for large values with a small spread.
+        """
+        width = (self.upper - self.lower) / self.num_bins
+        if width <= 0:
+            return None
+        return max(0, _WIDTH_DIGITS - 1 - math.floor(math.log10(width)))
+
+    def round_edge(self, value: float) -> float:
+        """Round a bucket edge relative to the bin width."""
+        decimals = self.edge_decimals
+        return value if decimals is None else round(value, decimals)
 
     @property
     def edges(self) -> np.ndarray:
@@ -127,6 +139,7 @@ def count_values(values: np.ndarray, spec: BinSpec) -> tuple[int, list[int], int
 def buckets_from_counts(spec: BinSpec, underflow: int, bin_counts: list[int], overflow: int) -> list[HistogramBucket]:
     """Assemble histogram buckets: optional underflow, all regular bins, optional overflow."""
     edges = spec.edges
+    round_edge = spec.round_edge
     buckets: list[HistogramBucket] = []
     if spec.has_underflow:
         buckets.append(

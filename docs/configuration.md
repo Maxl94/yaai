@@ -57,7 +57,7 @@ includes a `sample_info` object:
 | `total_count` (record count) | **Exact** — full population `COUNT(*)` | Uses the `(model_version_id, timestamp)` index, no JSON read required. |
 | `min` / `max` | Sample | Most-recent N records. Getting all-time exact min/max requires a full JSON-column scan (same cost as the unsampled query), which negates the performance gain. For monitoring, recent bounds are more meaningful than historical outliers. |
 | `mean`, `std`, `median` | Sample | Statistically representative at 50k rows. |
-| Histogram bucket counts | Sample | Shape is accurate; absolute counts reflect sample size. |
+| Histogram bucket counts | Sample | Shape is accurate; absolute counts reflect sample size. Buckets are 20 equal-width bins plus up to two outlier buckets (`is_underflow` / `is_overflow` in the API) for values below p1 / above p99, so up to 22 buckets are returned. |
 | Category percentages | Sample | Ratios are unaffected by sample size. |
 
 ---

@@ -185,9 +185,21 @@ class DashboardService(BaseService):
                 ORDER BY timestamp DESC
                 LIMIT :max_samples
             ),
-            data AS (
-                SELECT CAST(json_extract_path_text({col}, :field_name) AS DOUBLE PRECISION) AS val
+            parsed AS (
+                SELECT CAST(json_extract_path_text({col}, :field_name) AS DOUBLE PRECISION) AS raw_val
                 FROM sampled
+            ),
+            data AS (
+                -- NaN / +-Infinity (accepted by the cast from JSON strings) count as NULL, like in the Python path
+                SELECT CASE
+                    WHEN raw_val IN (
+                        CAST('NaN' AS DOUBLE PRECISION),
+                        CAST('Infinity' AS DOUBLE PRECISION),
+                        CAST('-Infinity' AS DOUBLE PRECISION)
+                    ) THEN NULL
+                    ELSE raw_val
+                END AS val
+                FROM parsed
             ),
             agg AS (
                 SELECT

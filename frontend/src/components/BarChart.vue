@@ -6,7 +6,7 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { CategoricalData } from '@/types'
-import { aggregateTopCategories, escapeHtml, isHorizontalLayout } from '@/utils/chartFormat'
+import { aggregateTopCategories, categoryDisplayName, escapeHtml, isHorizontalLayout } from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -45,7 +45,7 @@ const option = computed(() => {
       formatter: (params: { dataIndex: number }[]) => {
         const bar = items[params[0]?.dataIndex ?? 0]
         if (!bar) return ''
-        return `${escapeHtml(bar.label)}<br/>Count: ${bar.count} (${bar.percentage.toFixed(1)}%)`
+        return `${escapeHtml(categoryDisplayName(bar.label, bar.otherCount))}<br/>Count: ${bar.count} (${bar.percentage.toFixed(1)}%)`
       },
     },
     grid: {

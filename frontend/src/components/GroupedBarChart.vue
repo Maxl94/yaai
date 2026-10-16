@@ -6,7 +6,7 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { CategoricalData } from '@/types'
-import { aggregateGroupedCategories, escapeHtml, isHorizontalLayout } from '@/utils/chartFormat'
+import { aggregateGroupedCategories, categoryDisplayName, escapeHtml, isHorizontalLayout } from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -24,7 +24,7 @@ const horizontal = computed(() => isHorizontalLayout(bars.value.map((b) => b.lab
 // Horizontal layout needs ~30px per category (two bars); vertical keeps the compact default.
 const chartHeight = computed(() => (horizontal.value ? Math.max(220, 60 + bars.value.length * 30) : 220))
 
-type TooltipItem = { seriesName: string; value: number; marker: string; name: string }
+type TooltipItem = { seriesName: string; value: number; marker: string; dataIndex: number }
 
 const option = computed(() => {
   const items = bars.value
@@ -50,9 +50,10 @@ const option = computed(() => {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       formatter: (params: TooltipItem[]) => {
-        if (params.length === 0) return ''
+        const bar = items[params[0]?.dataIndex ?? 0]
+        if (!bar) return ''
         const rows = params.map((p) => `${p.marker} ${escapeHtml(p.seriesName)}: ${p.value}`)
-        return [escapeHtml(params[0]!.name), ...rows].join('<br/>')
+        return [escapeHtml(categoryDisplayName(bar.label, bar.otherCount)), ...rows].join('<br/>')
       },
     },
     legend: {

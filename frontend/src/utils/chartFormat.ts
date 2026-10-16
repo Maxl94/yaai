@@ -4,34 +4,57 @@ import type { CategoryCount, HistogramBucket } from '@/types'
 export const TOP_CATEGORIES = 10
 export const HORIZONTAL_LABEL_THRESHOLD = 12
 
+/** Labels always use one locale so decimal separators match the tooltips and statistics. */
+export const LABEL_LOCALE = 'en-US'
+
+/** Compact notation is only used if the bin width is at least this fraction of the value. */
+const COMPACT_MIN_WIDTH_RATIO = 0.01
+const MAX_PLAIN_DECIMALS = 8
+
 /**
- * Format a number compactly (1.5K, 2.3M); tiny values use few significant digits / exponent.
+ * Format a number for an axis label. With a bin `width`, the precision is chosen so that edges one bin
+ * apart stay distinguishable (compact notation only if the width is >= 1% of the value); without a width,
+ * three significant digits are used.
  */
-export function formatCompactNumber(value: number, locale?: string): string {
+export function formatCompactNumber(value: number, width?: number, locale = LABEL_LOCALE): string {
   if (!Number.isFinite(value)) return String(value)
   if (value === 0) return '0'
-  if (Math.abs(value) < 0.001) return String(Number(value.toPrecision(3)))
-  return new Intl.NumberFormat(locale, {
+  const compact = new Intl.NumberFormat(locale, {
     notation: 'compact',
     maximumSignificantDigits: 3,
+  })
+  if (width === undefined || !Number.isFinite(width) || width <= 0) {
+    return Math.abs(value) < 0.001 ? String(Number(value.toPrecision(3))) : compact.format(value)
+  }
+  if (width >= COMPACT_MIN_WIDTH_RATIO * Math.abs(value)) return compact.format(value)
+  const decimals = Math.max(0, Math.ceil(-Math.log10(width)) + 1)
+  if (decimals > MAX_PLAIN_DECIMALS) {
+    const digits = Math.min(Math.max(Math.ceil(Math.log10(Math.abs(value) / width)) + 2, 3), 15)
+    return String(Number(value.toPrecision(digits)))
+  }
+  return new Intl.NumberFormat(locale, {
+    maximumFractionDigits: decimals,
   }).format(value)
 }
 
 /**
- * Short axis label for a histogram bucket: "<1.2" (underflow), "≥98.7" (overflow), "1.2–3.4".
+ * Short axis label for a histogram bucket: "<1.2" (underflow), ">98.7" (overflow), "1.2–3.4".
+ * `width` is the width of the regular bins (defaults to the bucket's own width).
  */
-export function formatBucketLabel(bucket: HistogramBucket, locale?: string): string {
-  if (bucket.is_underflow) return `<${formatCompactNumber(bucket.range_end, locale)}`
-  if (bucket.is_overflow) return `≥${formatCompactNumber(bucket.range_start, locale)}`
-  const start = formatCompactNumber(bucket.range_start, locale)
+export function formatBucketLabel(bucket: HistogramBucket, width?: number, locale = LABEL_LOCALE): string {
+  if (bucket.is_underflow) return `<${formatCompactNumber(bucket.range_end, width, locale)}`
+  if (bucket.is_overflow) return `>${formatCompactNumber(bucket.range_start, width, locale)}`
+  const binWidth = width ?? bucket.range_end - bucket.range_start
+  const start = formatCompactNumber(bucket.range_start, binWidth, locale)
   if (bucket.range_start === bucket.range_end) return start
-  return `${start}–${formatCompactNumber(bucket.range_end, locale)}`
+  return `${start}–${formatCompactNumber(bucket.range_end, binWidth, locale)}`
 }
 
-/** Truncate a label to at most `max` characters, ending with an ellipsis. */
-export function truncateLabel(label: string, max: number): string {
-  if (label.length <= max) return label
-  return `${label.slice(0, Math.max(max - 1, 1))}…`
+/** Axis labels for all buckets, using the width of the regular bins for every label. */
+export function formatBucketLabels(buckets: HistogramBucket[], locale = LABEL_LOCALE): string[] {
+  const regular = buckets.find((b) => !b.is_underflow && !b.is_overflow)
+  const width = regular ? regular.range_end - regular.range_start : undefined
+  return buckets.map((b) => formatBucketLabel(b, width, locale))
 }
 
 /** Escape text for ECharts HTML tooltips. */
@@ -62,7 +85,13 @@ export interface CategoryBar {
 }
 
 function otherLabel(n: number): string {
-  return `Other (${n} ${n === 1 ? 'category' : 'categories'})`
+  return `Other (${n})`
+}
+
+/** Full text for tooltips; the short "Other (N)" axis label is expanded. */
+export function categoryDisplayName(label: string, otherCount?: number): string {
+  if (!otherCount) return label
+  return `Other (${otherCount} ${otherCount === 1 ? 'category' : 'categories'})`
 }
 
 /** Keep the `topN` most frequent categories and sum the rest into one "Other" bar. */

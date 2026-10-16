@@ -6,7 +6,7 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { HistogramData } from '@/types'
-import { bucketTooltipTitle, escapeHtml, formatBucketLabel } from '@/utils/chartFormat'
+import { bucketTooltipTitle, escapeHtml, formatBucketLabels } from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -65,7 +65,7 @@ const option = computed(() => {
     },
     xAxis: {
       type: 'category',
-      data: reference.map((b) => formatBucketLabel(b)),
+      data: formatBucketLabels(reference),
       axisLabel: {
         fontSize: 10,
         interval: 'auto',

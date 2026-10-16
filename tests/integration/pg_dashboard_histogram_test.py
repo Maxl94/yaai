@@ -12,7 +12,7 @@ from yaai.server.models.inference import InferenceData
 from yaai.server.services.histogram import build_histogram
 
 
-async def _seed_ages(client: AsyncClient, db: AsyncSession, ages: list[float | None]) -> tuple[str, str]:
+async def _seed_ages(client: AsyncClient, db: AsyncSession, ages: list[float | str | None]) -> tuple[str, str]:
     model = await create_model(client, name="pg-hist-model")
     version = await create_version(client, model["id"])
     now = datetime.now(UTC)
@@ -29,11 +29,14 @@ async def _seed_ages(client: AsyncClient, db: AsyncSession, ages: list[float | N
     return model["id"], version["id"]
 
 
-async def _age_buckets(client: AsyncClient, model_id: str, version_id: str) -> list[dict]:
+async def _age_panel(client: AsyncClient, model_id: str, version_id: str) -> dict:
     resp = await client.get(f"/api/v1/models/{model_id}/versions/{version_id}/dashboard")
     assert resp.status_code == 200
-    panel = next(p for p in resp.json()["data"]["panels"] if p["field_name"] == "age")
-    return panel["data"]["buckets"]
+    return next(p for p in resp.json()["data"]["panels"] if p["field_name"] == "age")
+
+
+async def _age_buckets(client: AsyncClient, model_id: str, version_id: str) -> list[dict]:
+    return (await _age_panel(client, model_id, version_id))["data"]["buckets"]
 
 
 def _expected(ages: list[float]) -> list[dict]:
@@ -100,3 +103,59 @@ async def test_sql_histogram_no_data_returns_no_buckets(owner_client: AsyncClien
     model_id, version_id = await _seed_ages(owner_client, pg_db, [])
 
     assert await _age_buckets(owner_client, model_id, version_id) == []
+
+
+async def test_sql_histogram_underflow_overflow_and_nulls_match_python_helper(
+    owner_client: AsyncClient, pg_db: AsyncSession
+):
+    rng = np.random.default_rng(3)
+    normal = [float(x) for x in rng.normal(50, 5, 300)]
+    model_id, version_id = await _seed_ages(owner_client, pg_db, [-1e5, *normal, 1e5, *[None] * 5])
+
+    panel = await _age_panel(owner_client, model_id, version_id)
+    buckets = panel["data"]["buckets"]
+
+    assert buckets[0]["is_underflow"] is True
+    assert buckets[-1]["is_overflow"] is True
+    assert buckets[0]["count"] > 1 and buckets[-1]["count"] > 1
+    assert len(buckets) == 22
+    assert panel["data"]["statistics"]["null_count"] == 5
+    assert panel["data"]["statistics"]["count"] == 302
+    _assert_equivalent(buckets, _expected([-1e5, *normal, 1e5]))
+
+
+async def test_sql_histogram_values_on_bin_edges_match_python_helper(owner_client: AsyncClient, pg_db: AsyncSession):
+    ages = [float(x) for x in range(101)]
+    model_id, version_id = await _seed_ages(owner_client, pg_db, ages)
+
+    buckets = await _age_buckets(owner_client, model_id, version_id)
+
+    assert len(buckets) == 20
+    assert buckets[0]["count"] == 5
+    assert buckets[-1]["count"] == 6
+    _assert_equivalent(buckets, _expected(ages))
+
+
+async def test_sql_histogram_large_offset_keeps_edges_distinct(owner_client: AsyncClient, pg_db: AsyncSession):
+    ages = [1.7e9 + float(x) for x in range(101)]
+    model_id, version_id = await _seed_ages(owner_client, pg_db, ages)
+
+    buckets = await _age_buckets(owner_client, model_id, version_id)
+
+    starts = [b["range_start"] for b in buckets]
+    assert starts == sorted(set(starts))
+    _assert_equivalent(buckets, _expected(ages))
+
+
+async def test_sql_histogram_ignores_non_finite_values(owner_client: AsyncClient, pg_db: AsyncSession):
+    rng = np.random.default_rng(11)
+    normal = [float(x) for x in rng.normal(50, 5, 200)]
+    model_id, version_id = await _seed_ages(owner_client, pg_db, [*normal, "NaN", "Infinity", "-Infinity"])
+
+    panel = await _age_panel(owner_client, model_id, version_id)
+
+    stats = panel["data"]["statistics"]
+    assert stats["count"] == 200
+    assert stats["null_count"] == 3
+    assert stats["max"] == pytest.approx(max(normal), abs=1e-3)
+    _assert_equivalent(panel["data"]["buckets"], _expected(normal))

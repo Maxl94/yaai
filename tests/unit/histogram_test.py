@@ -108,6 +108,24 @@ def test_tiny_range_labels_are_distinct():
     assert sum(b.count for b in buckets) == 50
 
 
+def test_large_offset_with_small_spread_keeps_edges_distinct():
+    values = 1.7e9 + np.arange(101, dtype=float)
+    buckets = build_histogram(values, num_bins=20)
+    assert len(buckets) == 20
+    starts = [b.range_start for b in buckets]
+    assert starts == sorted(set(starts))
+    assert all(b.range_start < b.range_end for b in buckets)
+    assert (buckets[0].range_start, buckets[-1].range_end) == (1.7e9, 1.7e9 + 100)
+    assert sum(b.count for b in buckets) == 101
+
+
+def test_edges_are_rounded_relative_to_bin_width():
+    spec = BinSpec.create(0.0, 1.0, 3, 0.0, 1.0)
+    assert spec.edge_decimals == 4
+    assert spec.round_edge(1 / 3) == 0.3333
+    assert BinSpec.create(5.0, 5.0, 20, 5.0, 5.0).round_edge(5.123456789) == 5.123456789
+
+
 def test_p1_equals_p99_falls_back_to_min_max():
     values = np.array([1.0] * 100 + [2.0])
     buckets = build_histogram(values, num_bins=4)
