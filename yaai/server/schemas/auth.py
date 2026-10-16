@@ -3,7 +3,16 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from yaai.server.auth.passwords import MAX_PASSWORD_BYTES
+from yaai.server.models.auth import UserRole
+
+
+def _validate_password_bytes(value: str) -> str:
+    if len(value.encode()) > MAX_PASSWORD_BYTES:
+        raise ValueError(f"Password must not exceed {MAX_PASSWORD_BYTES} bytes when UTF-8 encoded")
+    return value
 
 
 class LoginRequest(BaseModel):
@@ -49,18 +58,22 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=255)
     email: str | None = None
     password: str = Field(..., min_length=8)
-    role: str = "viewer"
+    role: UserRole = UserRole.VIEWER
+
+    _check_password = field_validator("password")(_validate_password_bytes)
 
 
 class UserUpdate(BaseModel):
     email: str | None = None
-    role: str | None = None
+    role: UserRole | None = None
     is_active: bool | None = None
 
 
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8)
+
+    _check_new_password = field_validator("new_password")(_validate_password_bytes)
 
 
 class ServiceAccountKeyInfo(BaseModel):

@@ -618,3 +618,206 @@ async def test_revoke_model_access_not_found(owner_client: AsyncClient):
     model_id = model_resp.json()["data"]["id"]
     resp = await owner_client.delete(f"/api/v1/auth/models/{model_id}/access/{uuid.uuid4()}")
     assert resp.status_code == 404
+
+
+# Access token validation against the database
+
+
+def _bearer(user: User, role: str | None = None) -> dict[str, str]:
+    token = create_access_token(AUTH_CONFIG, str(user.id), role or user.role.value)
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def test_token_of_deleted_user_rejected(
+    owner_client: AsyncClient, auth_client: AsyncClient, seeded_viewer: User, db_session: AsyncSession
+):
+    headers = _bearer(seeded_viewer)
+    assert (await auth_client.get("/api/v1/auth/me", headers=headers)).status_code == 200
+
+    assert (await owner_client.delete(f"/api/v1/auth/users/{seeded_viewer.id}")).status_code == 204
+
+    assert (await auth_client.get("/api/v1/auth/me", headers=headers)).status_code == 401
+
+
+async def test_token_of_deactivated_user_rejected(
+    owner_client: AsyncClient, auth_client: AsyncClient, seeded_viewer: User
+):
+    headers = _bearer(seeded_viewer)
+    resp = await owner_client.put(f"/api/v1/auth/users/{seeded_viewer.id}", json={"is_active": False})
+    assert resp.status_code == 200
+
+    assert (await auth_client.get("/api/v1/auth/me", headers=headers)).status_code == 401
+
+
+async def test_role_downgrade_effective_immediately(
+    owner_client: AsyncClient, auth_client: AsyncClient, seeded_viewer: User
+):
+    await owner_client.put(f"/api/v1/auth/users/{seeded_viewer.id}", json={"role": "owner"})
+    headers = _bearer(seeded_viewer, role="owner")
+    assert (await auth_client.get("/api/v1/auth/users", headers=headers)).status_code == 200
+
+    await owner_client.put(f"/api/v1/auth/users/{seeded_viewer.id}", json={"role": "viewer"})
+
+    # The token still claims "owner", but the database role wins
+    assert (await auth_client.get("/api/v1/auth/users", headers=headers)).status_code == 403
+
+
+async def test_token_with_forged_owner_role_gets_database_role(auth_client: AsyncClient, seeded_viewer: User):
+    headers = _bearer(seeded_viewer, role="owner")
+    assert (await auth_client.get("/api/v1/auth/users", headers=headers)).status_code == 403
+
+
+async def test_token_with_malformed_subject_rejected(auth_client: AsyncClient):
+    token = create_access_token(AUTH_CONFIG, "not-a-uuid", "owner")
+    resp = await auth_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+
+
+async def test_refresh_rejected_for_deactivated_user(
+    owner_client: AsyncClient, auth_client: AsyncClient, seeded_viewer: User
+):
+    login = await auth_client.post("/api/v1/auth/login", json={"username": "viewer", "password": "viewer-password-123"})
+    refresh = login.json()["data"]["refresh_token"]
+
+    await owner_client.put(f"/api/v1/auth/users/{seeded_viewer.id}", json={"is_active": False})
+
+    resp = await auth_client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+    assert resp.status_code == 401
+
+
+async def test_refresh_issues_token_with_current_role(
+    owner_client: AsyncClient, auth_client: AsyncClient, seeded_viewer: User
+):
+    login = await auth_client.post("/api/v1/auth/login", json={"username": "viewer", "password": "viewer-password-123"})
+    refresh = login.json()["data"]["refresh_token"]
+
+    await owner_client.put(f"/api/v1/auth/users/{seeded_viewer.id}", json={"role": "owner"})
+
+    resp = await auth_client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["user"]["role"] == "owner"
+
+
+# Password change hardening
+
+
+async def test_change_password_revokes_refresh_tokens(auth_client: AsyncClient, seeded_owner: User):
+    login = await auth_client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"})
+    tokens = login.json()["data"]
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    resp = await auth_client.put(
+        "/api/v1/auth/me/password",
+        headers=headers,
+        json={"current_password": "admin-password-123", "new_password": "new-secure-password"},
+    )
+    assert resp.status_code == 200
+
+    refresh = await auth_client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert refresh.status_code == 401
+
+
+async def test_user_without_local_password_cannot_set_password(auth_client: AsyncClient, db_session: AsyncSession):
+    google_user = User(
+        username="google-user",
+        email="google-user@example.com",
+        hashed_password=None,
+        role=UserRole.VIEWER,
+        auth_provider=AuthProvider.GOOGLE,
+        google_sub="google-sub-123",
+        is_active=True,
+    )
+    db_session.add(google_user)
+    await db_session.commit()
+    await db_session.refresh(google_user)
+
+    resp = await auth_client.put(
+        "/api/v1/auth/me/password",
+        headers=_bearer(google_user),
+        json={"current_password": "anything", "new_password": "new-secure-password"},
+    )
+    assert resp.status_code == 400
+
+    await db_session.refresh(google_user)
+    assert google_user.hashed_password is None
+
+
+# Password length (bcrypt 72-byte limit)
+
+TOO_LONG_PASSWORD = "a" * 73
+
+
+async def test_create_user_with_too_long_password_rejected(owner_client: AsyncClient):
+    resp = await owner_client.post(
+        "/api/v1/auth/users",
+        json={"username": "long-pw", "password": TOO_LONG_PASSWORD, "role": "viewer"},
+    )
+    assert resp.status_code == 422
+    assert "72 bytes" in resp.text
+
+
+async def test_create_user_with_multibyte_password_over_limit_rejected(owner_client: AsyncClient):
+    resp = await owner_client.post(
+        "/api/v1/auth/users",
+        json={"username": "long-pw-utf8", "password": "ü" * 37, "role": "viewer"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_change_password_to_too_long_password_rejected(owner_client: AsyncClient):
+    resp = await owner_client.put(
+        "/api/v1/auth/me/password",
+        json={"current_password": "admin-password-123", "new_password": TOO_LONG_PASSWORD},
+    )
+    assert resp.status_code == 422
+
+
+async def test_login_with_too_long_password_returns_401(auth_client: AsyncClient, seeded_owner: User):
+    resp = await auth_client.post("/api/v1/auth/login", json={"username": "admin", "password": TOO_LONG_PASSWORD})
+    assert resp.status_code == 401
+
+
+# Role validation
+
+
+async def test_create_user_with_invalid_role_rejected(owner_client: AsyncClient):
+    resp = await owner_client.post(
+        "/api/v1/auth/users",
+        json={"username": "bad-role", "password": "valid-password-1", "role": "superadmin"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_update_user_with_invalid_role_rejected(owner_client: AsyncClient, seeded_viewer: User):
+    resp = await owner_client.put(f"/api/v1/auth/users/{seeded_viewer.id}", json={"role": "superadmin"})
+    assert resp.status_code == 422
+
+
+# Model access targets must exist
+
+
+async def test_grant_access_to_unknown_model_returns_404(owner_client: AsyncClient):
+    sa_resp = await owner_client.post(
+        "/api/v1/auth/service-accounts", json={"name": "sa-no-model", "auth_type": "api_key"}
+    )
+    sa_id = sa_resp.json()["data"]["service_account"]["id"]
+
+    resp = await owner_client.post(f"/api/v1/auth/models/{uuid.uuid4()}/access", json={"service_account_id": sa_id})
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Model not found"
+
+
+async def test_grant_access_to_unknown_service_account_returns_404(owner_client: AsyncClient):
+    model_resp = await owner_client.post("/api/v1/models", json={"name": "model-no-sa"})
+    model_id = model_resp.json()["data"]["id"]
+
+    resp = await owner_client.post(
+        f"/api/v1/auth/models/{model_id}/access", json={"service_account_id": str(uuid.uuid4())}
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Service account not found"
+
+
+async def test_list_access_for_unknown_model_returns_404(owner_client: AsyncClient):
+    resp = await owner_client.get(f"/api/v1/auth/models/{uuid.uuid4()}/access")
+    assert resp.status_code == 404
