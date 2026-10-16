@@ -11,6 +11,7 @@ async def paginate_query(
     query: Select,
     page: int = 1,
     page_size: int = 20,
+    as_rows: bool = False,
 ) -> tuple[list[Any], int]:
     """Execute a query with pagination and return results with total count.
 
@@ -19,6 +20,7 @@ async def paginate_query(
         query: Base SQLAlchemy select query (without offset/limit).
         page: 1-based page number.
         page_size: Maximum number of results per page.
+        as_rows: Return full result rows instead of the first column (for multi-column selects).
 
     Returns:
         A tuple of (list of results, total count).
@@ -31,4 +33,4 @@ async def paginate_query(
     paginated = query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(paginated)
 
-    return list(result.scalars().all()), total
+    return (list(result.all()) if as_rows else list(result.scalars().all())), total

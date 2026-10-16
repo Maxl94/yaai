@@ -92,7 +92,7 @@ Drift detection runs on a schedule. A **job** defines:
 
 When you create a model version, YAAI creates a default job automatically (daily at 2am, comparing the last day of inferences against reference data). It activates when you upload reference data.
 
-Each job run produces a drift result per schema field. If any field exceeds its threshold, a notification is created.
+Each job run produces a drift result per schema field. If any field exceeds its threshold, a notification is created. Read state is tracked per user and per service account, so marking a notification as read only affects the person (or service account) who did it. With authentication disabled, a single global read flag is used. Notifications created before a user or service account existed count as read for them, so new accounts do not start with the historic backlog as unread.
 
 ### Comparison view
 
