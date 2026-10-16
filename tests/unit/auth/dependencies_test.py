@@ -277,7 +277,8 @@ class TestModelAccessWithoutDatabaseLookup:
 
     async def test_accessible_ids_empty_for_sa_without_id(self, auth_config):
         identity = CurrentIdentity(user_id=None, role=UserRole.VIEWER, identity_type="api_key", service_account_id=None)
-        assert await get_accessible_model_ids(identity, AsyncMock()) == []
+        query = await get_accessible_model_ids(identity, AsyncMock())
+        assert any(marker in str(query).lower() for marker in ("false", "0 = 1"))
 
 
 class TestResolveModelIdFromVersion:

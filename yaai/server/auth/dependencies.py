@@ -7,7 +7,7 @@ import uuid
 import jwt as pyjwt
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import ColumnElement, Select, false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.server.auth.config import AuthConfig
@@ -428,8 +428,11 @@ async def check_version_read_access(
 async def get_accessible_model_ids(
     identity: CurrentIdentity,
     db: AsyncSession,
-) -> list[uuid.UUID] | None:
-    """Return the IDs of the models the identity may read, or None if no filtering is needed.
+) -> Select | None:
+    """Return a subquery of the model IDs the identity may read, or None if no filtering is needed.
+
+    Pass the result to ``.in_()``; it is evaluated inside the database, not materialized in Python.
+    ``db`` is unused and only kept for call-site symmetry with the other access helpers.
 
     Global owners (and disabled authentication): None (no filtering).
     Users: models of the projects they are a member of.
@@ -439,7 +442,7 @@ async def get_accessible_model_ids(
         return None
     membership_filter = _membership_filter(identity)
     if membership_filter is None:
-        return []
+        return select(Model.id).where(false())
     conditions = [Model.project_id.in_(select(ProjectMembership.project_id).where(membership_filter))]
     if identity.is_service_account:
         conditions.append(
@@ -449,5 +452,4 @@ async def get_accessible_model_ids(
                 )
             )
         )
-    result = await db.execute(select(Model.id).where(or_(*conditions)))
-    return list(result.scalars().all())
+    return select(Model.id).where(or_(*conditions))

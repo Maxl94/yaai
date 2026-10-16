@@ -144,6 +144,13 @@ async def test_project_role_for_model(world: World):
     assert await get_project_role_for_model(world.sa("acl"), world.model_a.id, db) is None
 
 
+async def _materialize(world: World, identity) -> list | None:
+    query = await get_accessible_model_ids(identity, world.db)
+    if query is None:
+        return None
+    return list((await world.db.execute(query)).scalars().all())
+
+
 @pytest.mark.parametrize(
     ("kind", "name", "expected"),
     [
@@ -158,7 +165,7 @@ async def test_project_role_for_model(world: World):
 )
 async def test_accessible_model_ids(world: World, kind: str, name: str, expected: list[str] | None):
     identity = world.user(name) if kind == "user" else world.sa(name)
-    ids = await get_accessible_model_ids(identity, world.db)
+    ids = await _materialize(world, identity)
     assert ids == (None if expected is None else [world.model_a.id for _ in expected])
 
 
@@ -169,7 +176,7 @@ async def test_service_account_gets_union_of_acl_and_project_models(world: World
     world.db.add(ModelAccess(model_id=other.id, service_account_id=world.sas["editor"].id))
     await world.db.commit()
 
-    ids = await get_accessible_model_ids(world.sa("editor"), world.db)
+    ids = await _materialize(world, world.sa("editor"))
 
     assert sorted(ids) == sorted([world.model_a.id, other.id])
 
