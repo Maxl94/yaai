@@ -85,7 +85,41 @@ export interface Model {
   versions?: ModelVersionSummary[]
   active_version?: ModelVersionSummary | null
   total_inferences?: number
+  project_id?: string | null
+  project_name?: string | null
 }
+
+// Project types
+export type ProjectRole = 'owner' | 'editor' | 'viewer'
+
+export interface Project {
+  id: string
+  name: string
+  description: string | null
+  is_default: boolean
+  model_count: number
+  my_role: ProjectRole | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectMember {
+  id: string
+  project_id: string
+  principal_type: 'user' | 'service_account'
+  user_id: string | null
+  service_account_id: string | null
+  name: string
+  email: string | null
+  role: ProjectRole
+  created_at: string
+}
+
+export type ProjectMemberCreate = { role: ProjectRole } & (
+  | { user_id: string }
+  | { username: string }
+  | { service_account_id: string }
+)
 
 export interface ModelVersionSummary {
   id: string

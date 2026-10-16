@@ -4,15 +4,55 @@ import { useRoute, useRouter } from 'vue-router'
 import { modelsApi } from '@/api/models'
 import { authApi } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { useProjectsStore } from '@/stores/projects'
+import { errorMessage } from '@/utils/errors'
 import CopyableId from '@/components/CopyableId.vue'
 import type { Model, ModelVersionSummary, SchemaFieldCreate, SchemaField, ModelAccessEntry, ServiceAccount } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const projectsStore = useProjectsStore()
 const modelId = computed(() => route.params.modelId as string)
 
 const model = ref<Model | null>(null)
+const canWrite = computed(() => projectsStore.canWrite(model.value?.project_id))
+
+// Move to project (global owner only)
+const showMoveDialog = ref(false)
+const moveTargetId = ref<string | null>(null)
+const moving = ref(false)
+const moveError = ref<string | null>(null)
+const moveTargets = computed(() =>
+  projectsStore.projects
+    .filter((p) => p.id !== model.value?.project_id)
+    .map((p) => ({ title: p.name, value: p.id })),
+)
+
+function openMoveDialog() {
+  moveTargetId.value = null
+  moveError.value = null
+  showMoveDialog.value = true
+}
+
+async function handleMove() {
+  if (!model.value || !moveTargetId.value) return
+  moving.value = true
+  moveError.value = null
+  try {
+    const moved = await modelsApi.update(modelId.value, { project_id: moveTargetId.value })
+    model.value.project_id = moved.project_id ?? moveTargetId.value
+    model.value.project_name =
+      moved.project_name ?? projectsStore.projects.find((p) => p.id === moveTargetId.value)?.name ?? null
+    showMoveDialog.value = false
+    projectsStore.load()
+  } catch (error) {
+    console.error('Failed to move model:', error)
+    moveError.value = errorMessage(error, 'Failed to move model')
+  } finally {
+    moving.value = false
+  }
+}
 const loading = ref(true)
 const editingName = ref(false)
 const editedName = ref('')
@@ -276,7 +316,28 @@ onMounted(() => {
         <template v-if="!editingName">
           <v-icon start>mdi-cube-outline</v-icon>
           {{ model.name }}
-          <v-btn icon="mdi-pencil" size="small" variant="text" class="ml-2" @click="startEditing" />
+          <v-btn v-if="canWrite" icon="mdi-pencil" size="small" variant="text" class="ml-2" @click="startEditing" />
+          <v-chip
+            v-if="model.project_name"
+            size="small"
+            variant="tonal"
+            color="primary"
+            prepend-icon="mdi-folder-outline"
+            class="ml-3"
+            data-testid="model-project"
+          >
+            {{ model.project_name }}
+          </v-chip>
+          <v-btn
+            v-if="projectsStore.isGlobalAdmin && projectsStore.projects.length > 1"
+            size="small"
+            variant="text"
+            prepend-icon="mdi-folder-move-outline"
+            class="ml-1"
+            @click="openMoveDialog"
+          >
+            Move to project
+          </v-btn>
         </template>
         <template v-else>
           <v-text-field
@@ -315,7 +376,7 @@ onMounted(() => {
     <div class="d-flex align-center mb-4">
       <h2 class="text-h5">Versions</h2>
       <v-spacer />
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="showCreateVersionDialog = true">
+      <v-btn v-if="canWrite" color="primary" prepend-icon="mdi-plus" @click="showCreateVersionDialog = true">
         New Version
       </v-btn>
     </div>
@@ -481,7 +542,7 @@ onMounted(() => {
           </span>
           <v-spacer />
           <v-btn
-            v-if="!editingSchema && !loadingSchema"
+            v-if="canWrite && !editingSchema && !loadingSchema"
             icon
             variant="text"
             color="white"
@@ -605,7 +666,7 @@ onMounted(() => {
             <v-icon size="48" color="grey-lighten-1">mdi-file-tree-outline</v-icon>
             <p class="text-body-1 text-medium-emphasis mt-2">No schema fields defined</p>
             <v-btn
-              v-if="!editingSchema"
+              v-if="canWrite && !editingSchema"
               variant="outlined"
               color="primary"
               class="mt-2"
@@ -638,6 +699,31 @@ onMounted(() => {
           </template>
           <v-btn v-else variant="flat" color="primary" @click="showSchemaDialog = false">
             Close
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Move to Project Dialog -->
+    <v-dialog v-model="showMoveDialog" max-width="480">
+      <v-card>
+        <v-card-title class="pa-4">Move Model to Project</v-card-title>
+        <v-card-text>
+          <v-alert v-if="moveError" type="error" variant="tonal" density="compact" class="mb-4">
+            {{ moveError }}
+          </v-alert>
+          <v-select
+            v-model="moveTargetId"
+            :items="moveTargets"
+            label="Target project"
+            data-testid="move-target-project"
+          />
+        </v-card-text>
+        <v-card-actions class="pa-4">
+          <v-spacer />
+          <v-btn variant="text" @click="showMoveDialog = false">Cancel</v-btn>
+          <v-btn color="primary" variant="flat" :loading="moving" :disabled="!moveTargetId" @click="handleMove">
+            Move
           </v-btn>
         </v-card-actions>
       </v-card>

@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import { jobsApi } from '@/api/jobs'
 import { modelsApi } from '@/api/models'
 import VersionNavTabs from '@/components/VersionNavTabs.vue'
+import { useProjectsStore } from '@/stores/projects'
+import { errorMessage } from '@/utils/errors'
 import type { JobConfig, Model, ModelVersion } from '@/types'
 
 interface JobHistoryItem {
@@ -19,8 +21,30 @@ const modelId = computed(() => route.params.modelId as string | undefined)
 const versionId = computed(() => route.params.versionId as string | undefined)
 const hasRouteParams = computed(() => !!modelId.value && !!versionId.value)
 
+const projectsStore = useProjectsStore()
+
 const model = ref<Model | null>(null)
 const version = ref<ModelVersion | null>(null)
+// Jobs only reference a model version; on the global page the project is resolved via the accessible models
+const versionProjects = ref<Record<string, string | null | undefined>>({})
+
+function canWriteJob(job: JobConfig): boolean {
+  if (hasRouteParams.value) return projectsStore.canWrite(model.value?.project_id)
+  return projectsStore.canWrite(versionProjects.value[job.model_version_id])
+}
+
+const actionError = ref('')
+const showActionError = computed({
+  get: () => !!actionError.value,
+  set: (value: boolean) => {
+    if (!value) actionError.value = ''
+  },
+})
+
+function reportActionError(error: unknown, fallback: string) {
+  console.error(fallback, error)
+  actionError.value = errorMessage(error, fallback)
+}
 
 const loading = ref(false)
 const saving = ref(false)
@@ -143,7 +167,7 @@ async function saveJob() {
     showEditDialog.value = false
     await loadJobs()
   } catch (error) {
-    console.error('Failed to update job:', error)
+    reportActionError(error, 'Failed to update job')
   } finally {
     saving.value = false
   }
@@ -155,7 +179,7 @@ async function toggleJobActive(job: JobConfig) {
     await jobsApi.update(job.id, { is_active: newState })
     job.is_active = newState
   } catch (error) {
-    console.error('Failed to update job:', error)
+    reportActionError(error, 'Failed to update job')
   }
 }
 
@@ -165,7 +189,7 @@ async function triggerJob(job: JobConfig) {
     await jobsApi.trigger(job.id)
     await loadJobs()
   } catch (error) {
-    console.error('Failed to trigger job:', error)
+    reportActionError(error, 'Failed to trigger job')
   } finally {
     triggeringJob.value = null
   }
@@ -177,7 +201,7 @@ async function backfillJob(job: JobConfig) {
     await jobsApi.backfill(job.id)
     await loadJobs()
   } catch (error) {
-    console.error('Failed to backfill job:', error)
+    reportActionError(error, 'Failed to backfill job')
   } finally {
     backfillingJob.value = null
   }
@@ -201,6 +225,22 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleString()
 }
 
+// Only versions of writable projects are resolved; every other job stays read-only
+async function loadVersionProjects() {
+  await projectsStore.ensureLoaded()
+  if (projectsStore.isGlobalAdmin) return
+  try {
+    const models = await modelsApi.list({ page_size: 100 })
+    const writable = models.filter((m) => projectsStore.canWrite(m.project_id))
+    const versionLists = await Promise.all(writable.map((m) => modelsApi.listVersions(m.id)))
+    versionProjects.value = Object.fromEntries(
+      versionLists.flatMap((versions, i) => versions.map((v) => [v.id, writable[i]!.project_id] as const)),
+    )
+  } catch (error) {
+    console.error('Failed to resolve job permissions:', error)
+  }
+}
+
 async function loadModelVersion() {
   if (!modelId.value || !versionId.value) return
   try {
@@ -219,6 +259,8 @@ onMounted(() => {
   loadJobs()
   if (hasRouteParams.value) {
     loadModelVersion()
+  } else {
+    loadVersionProjects()
   }
 })
 </script>
@@ -289,8 +331,9 @@ onMounted(() => {
               :color="item.is_active ? 'success' : 'grey'"
               size="small"
               variant="flat"
-              @click="toggleJobActive(item)"
-              style="cursor: pointer"
+              :link="canWriteJob(item)"
+              :style="{ cursor: canWriteJob(item) ? 'pointer' : 'default' }"
+              @click="canWriteJob(item) && toggleJobActive(item)"
             >
               <v-icon start size="14">
                 {{ item.is_active ? 'mdi-check-circle' : 'mdi-pause-circle' }}
@@ -307,6 +350,7 @@ onMounted(() => {
           <template #item.actions="{ item }">
             <div class="d-flex ga-1">
               <v-btn
+                v-if="canWriteJob(item)"
                 icon
                 size="small"
                 variant="tonal"
@@ -317,6 +361,7 @@ onMounted(() => {
                 <v-tooltip activator="parent" location="top">Edit</v-tooltip>
               </v-btn>
               <v-btn
+                v-if="canWriteJob(item)"
                 icon
                 size="small"
                 variant="tonal"
@@ -328,6 +373,7 @@ onMounted(() => {
                 <v-tooltip activator="parent" location="top">Run Now</v-tooltip>
               </v-btn>
               <v-btn
+                v-if="canWriteJob(item)"
                 icon
                 size="small"
                 variant="tonal"
@@ -543,6 +589,10 @@ onMounted(() => {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <v-snackbar v-model="showActionError" color="error" :timeout="6000" data-testid="job-action-error">
+      {{ actionError }}
+    </v-snackbar>
   </div>
 </template>
 
