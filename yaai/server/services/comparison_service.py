@@ -12,10 +12,12 @@ from yaai.server.models.model import SchemaField
 from yaai.server.schemas.dashboard import (
     CategoricalData,
     CategoricalStatistics,
+    HistogramBucket,
     HistogramData,
     NumericalStatistics,
 )
 from yaai.server.services.base import BaseService
+from yaai.server.services.histogram import build_histograms_shared
 
 
 class ComparisonPanel:
@@ -174,11 +176,7 @@ class ComparisonService(BaseService):
         num_a = [v for v in values_a if v is not None]
         num_b = [v for v in values_b if v is not None]
 
-        # Compute shared bucket boundaries from the union range
-        all_values = num_a + num_b
-        num_buckets = 20
-
-        if not all_values:
+        if not num_a and not num_b:
             empty = HistogramData(
                 buckets=[],
                 statistics=NumericalStatistics(mean=0, median=0, std=0, min=0, max=0, count=0, null_count=0),
@@ -192,16 +190,9 @@ class ComparisonService(BaseService):
                 data_b=empty,
             )
 
-        combined = np.array(all_values, dtype=float)
-        min_val, max_val = float(combined.min()), float(combined.max())
-
-        if min_val == max_val:
-            edges = np.array([min_val, max_val + 1])
-        else:
-            edges = np.linspace(min_val, max_val, num_buckets + 1)
-
-        data_a_hist = self._histogram_from_edges(num_a, edges, len(values_a) - len(num_a))
-        data_b_hist = self._histogram_from_edges(num_b, edges, len(values_b) - len(num_b))
+        hist_a, hist_b = build_histograms_shared(np.array(num_a, dtype=float), np.array(num_b, dtype=float))
+        data_a_hist = self._histogram_data(num_a, hist_a, len(values_a) - len(num_a))
+        data_b_hist = self._histogram_data(num_b, hist_b, len(values_b) - len(num_b))
 
         return ComparisonPanel(
             field_name=field.field_name,
@@ -236,16 +227,13 @@ class ComparisonService(BaseService):
         )
 
     @staticmethod
-    def _histogram_from_edges(values: list, edges: np.ndarray, null_count: int) -> HistogramData:
+    def _histogram_data(values: list, buckets: list[HistogramBucket], null_count: int) -> HistogramData:
         if not values:
             return HistogramData(
                 buckets=[],
                 statistics=NumericalStatistics(mean=0, median=0, std=0, min=0, max=0, count=0, null_count=null_count),
             )
-
         arr = np.array(values, dtype=float)
-        counts = np.histogram(arr, bins=edges)[0]
-        buckets = BaseService.build_histogram_buckets(edges, counts)
         return HistogramData(
             buckets=buckets,
             statistics=BaseService.compute_numerical_statistics(arr, values, null_count),

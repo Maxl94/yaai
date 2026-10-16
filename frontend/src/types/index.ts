@@ -191,6 +191,8 @@ export interface HistogramBucket {
   range_start: number
   range_end: number
   count: number
+  is_underflow?: boolean
+  is_overflow?: boolean
 }
 
 export interface NumericalStatistics {
