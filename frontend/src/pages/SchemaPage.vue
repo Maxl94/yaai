@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { modelsApi } from '@/api/models'
 import { jobsApi } from '@/api/jobs'
 import VersionNavTabs from '@/components/VersionNavTabs.vue'
+import { useProjectsStore } from '@/stores/projects'
 import type { Model, ModelVersion, SchemaField } from '@/types'
 
 const route = useRoute()
@@ -11,8 +12,11 @@ const route = useRoute()
 const modelId = computed(() => route.params.modelId as string)
 const versionId = computed(() => route.params.versionId as string)
 
+const projectsStore = useProjectsStore()
+
 const loading = ref(false)
 const model = ref<Model | null>(null)
+const canWrite = computed(() => projectsStore.canWrite(model.value?.project_id))
 const version = ref<ModelVersion | null>(null)
 const schemaFields = ref<SchemaField[]>([])
 
@@ -242,7 +246,7 @@ onMounted(() => {
                 </td>
                 <td class="text-center">
                   <v-btn
-                    v-if="editingFieldId !== field.id"
+                    v-if="canWrite && editingFieldId !== field.id"
                     icon="mdi-pencil-outline"
                     size="x-small"
                     variant="text"

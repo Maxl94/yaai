@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { modelsApi } from '@/api/models'
 import { jobsApi } from '@/api/jobs'
+import { useProjectsStore } from '@/stores/projects'
 import type { Model, ModelVersion, DriftResult, SchemaField, DriftOverviewItem } from '@/types'
 import DriftTimelineChart from '@/components/DriftTimelineChart.vue'
 import VersionNavTabs from '@/components/VersionNavTabs.vue'
@@ -20,8 +21,10 @@ const driftResults = ref<DriftResult[]>([])
 const driftThreshold = ref(0.1)
 
 // Model and version details when using route params
+const projectsStore = useProjectsStore()
 const model = ref<Model | null>(null)
 const version = ref<ModelVersion | null>(null)
+const canWrite = computed(() => projectsStore.canWrite(model.value?.project_id))
 
 // Schema fields from the loaded version
 const schemaFields = ref<SchemaField[]>([])
@@ -420,7 +423,8 @@ watch(overviewPage, () => {
                           variant="outlined"
                           color="teal"
                           class="threshold-chip"
-                          @click="startEditingThreshold(field)"
+                          :link="canWrite"
+                          @click="canWrite && startEditingThreshold(field)"
                         >
                           <v-icon start size="small">mdi-tune-vertical</v-icon>
                           {{

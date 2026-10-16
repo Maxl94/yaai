@@ -1,21 +1,29 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { modelsApi } from '@/api/models'
 import CopyableId from '@/components/CopyableId.vue'
-import { useAuthStore } from '@/stores/auth'
+import { useProjectsStore } from '@/stores/projects'
+import { errorMessage } from '@/utils/errors'
 import type { Model } from '@/types'
 
 const router = useRouter()
-const authStore = useAuthStore()
+const projectsStore = useProjectsStore()
 const models = ref<Model[]>([])
 const loading = ref(true)
 const search = ref('')
 const showCreateDialog = ref(false)
 const showDeleteDialog = ref(false)
 const modelToDelete = ref<Model | null>(null)
-const newModel = ref({ name: '', description: '' })
+const newModel = ref({ name: '', description: '', project_id: null as string | null })
 const creating = ref(false)
+const createError = ref<string | null>(null)
+const deleteError = ref<string | null>(null)
+
+const showProjectChip = computed(() => !projectsStore.currentProjectId)
+const projectOptions = computed(() =>
+  projectsStore.writableProjects.map((p) => ({ title: p.name, value: p.id })),
+)
 
 // Health status: 'healthy' | 'drifted' | 'loading' | null
 const modelHealth = reactive<Record<string, 'healthy' | 'drifted' | 'loading' | null>>({})
@@ -32,7 +40,8 @@ const filteredModels = computed(() => {
 async function fetchModels() {
   loading.value = true
   try {
-    models.value = await modelsApi.list()
+    const projectId = projectsStore.currentProjectId
+    models.value = await modelsApi.list(projectId ? { project_id: projectId } : {})
   } catch (error) {
     console.error('Failed to fetch models:', error)
   } finally {
@@ -60,20 +69,34 @@ async function checkModelHealth(model: Model) {
   }
 }
 
+function openCreateDialog() {
+  const preferred = [projectsStore.currentProjectId, projectsStore.defaultProject?.id].find(
+    (id) => id && projectsStore.canWrite(id),
+  )
+  newModel.value = {
+    name: '',
+    description: '',
+    project_id: preferred ?? projectsStore.writableProjects[0]?.id ?? null,
+  }
+  createError.value = null
+  showCreateDialog.value = true
+}
+
 async function handleCreate() {
   if (!newModel.value.name) return
   creating.value = true
+  createError.value = null
   try {
     const created = await modelsApi.create({
       name: newModel.value.name,
       description: newModel.value.description || undefined,
+      project_id: newModel.value.project_id ?? undefined,
     })
-    models.value.push(created)
     showCreateDialog.value = false
-    newModel.value = { name: '', description: '' }
     router.push(`/models/${created.id}`)
   } catch (error) {
     console.error('Failed to create model:', error)
+    createError.value = errorMessage(error, 'Failed to create model')
   } finally {
     creating.value = false
   }
@@ -88,7 +111,20 @@ async function handleDelete() {
     modelToDelete.value = null
   } catch (error) {
     console.error('Failed to delete model:', error)
+    deleteError.value = errorMessage(error, 'Failed to delete model')
   }
+}
+
+function confirmDelete(model: Model) {
+  modelToDelete.value = model
+  deleteError.value = null
+  showDeleteDialog.value = true
+}
+
+async function loadModelsWithHealth() {
+  await fetchModels()
+  // Fire background health checks for all models
+  models.value.forEach(m => checkModelHealth(m))
 }
 
 function getActiveVersion(model: Model) {
@@ -106,10 +142,11 @@ function getInferenceCount(model: Model) {
 }
 
 onMounted(async () => {
-  await fetchModels()
-  // Fire background health checks for all models
-  models.value.forEach(m => checkModelHealth(m))
+  await projectsStore.ensureLoaded()
+  await loadModelsWithHealth()
 })
+
+watch(() => projectsStore.currentProjectId, loadModelsWithHealth)
 </script>
 
 <template>
@@ -121,11 +158,11 @@ onMounted(async () => {
         <p class="page-subtitle">Manage your ML models and monitor for data drift</p>
       </div>
       <v-btn
-        v-if="authStore.isOwner"
+        v-if="projectsStore.canCreateModel"
         color="primary"
         size="large"
         prepend-icon="mdi-plus"
-        @click="showCreateDialog = true"
+        @click="openCreateDialog"
       >
         New Model
       </v-btn>
@@ -190,10 +227,11 @@ onMounted(async () => {
                     @click.stop="router.push(`/models/${model.id}`)"
                   />
                   <v-list-item
+                    v-if="projectsStore.isGlobalAdmin"
                     prepend-icon="mdi-delete-outline"
                     title="Delete"
                     base-color="error"
-                    @click.stop="modelToDelete = model; showDeleteDialog = true"
+                    @click.stop="confirmDelete(model)"
                   />
                 </v-list>
               </v-menu>
@@ -209,6 +247,16 @@ onMounted(async () => {
             <p v-else class="model-description text-disabled">
               No description
             </p>
+            <v-chip
+              v-if="showProjectChip && model.project_name"
+              size="x-small"
+              variant="tonal"
+              color="primary"
+              prepend-icon="mdi-folder-outline"
+              class="mt-2 mr-2 project-chip"
+            >
+              {{ model.project_name }}
+            </v-chip>
             <CopyableId label="ID" :value="model.id" class="mt-2" />
           </v-card-text>
 
@@ -240,10 +288,10 @@ onMounted(async () => {
         Create your first model to start monitoring for data drift
       </p>
       <v-btn
-        v-if="authStore.isOwner"
+        v-if="projectsStore.canCreateModel"
         color="primary"
         prepend-icon="mdi-plus"
-        @click="showCreateDialog = true"
+        @click="openCreateDialog"
       >
         Create Model
       </v-btn>
@@ -257,6 +305,18 @@ onMounted(async () => {
           Create New Model
         </v-card-title>
         <v-card-text class="pt-4">
+          <v-alert v-if="createError" type="error" variant="tonal" density="compact" class="mb-4">
+            {{ createError }}
+          </v-alert>
+          <v-select
+            v-if="projectsStore.projects.length > 0"
+            v-model="newModel.project_id"
+            :items="projectOptions"
+            label="Project"
+            no-data-text="No project with write access"
+            class="mb-4"
+            data-testid="create-model-project"
+          />
           <v-text-field
             v-model="newModel.name"
             label="Model Name"
@@ -276,7 +336,7 @@ onMounted(async () => {
           <v-btn
             color="primary"
             :loading="creating"
-            :disabled="!newModel.name"
+            :disabled="!newModel.name || (projectsStore.projects.length > 0 && !newModel.project_id)"
             @click="handleCreate"
           >
             Create Model
@@ -295,6 +355,9 @@ onMounted(async () => {
         <v-card-text class="pt-4">
           Are you sure you want to delete <strong>{{ modelToDelete?.name }}</strong>? 
           This action cannot be undone and will remove all versions, inferences, and drift results.
+          <v-alert v-if="deleteError" type="error" variant="tonal" density="compact" class="mt-4">
+            {{ deleteError }}
+          </v-alert>
         </v-card-text>
         <v-card-actions class="dialog-actions">
           <v-btn variant="text" @click="showDeleteDialog = false">Cancel</v-btn>

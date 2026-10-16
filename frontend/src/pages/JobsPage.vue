@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { jobsApi } from '@/api/jobs'
 import { modelsApi } from '@/api/models'
 import VersionNavTabs from '@/components/VersionNavTabs.vue'
+import { useProjectsStore } from '@/stores/projects'
 import type { JobConfig, Model, ModelVersion } from '@/types'
 
 interface JobHistoryItem {
@@ -19,8 +20,14 @@ const modelId = computed(() => route.params.modelId as string | undefined)
 const versionId = computed(() => route.params.versionId as string | undefined)
 const hasRouteParams = computed(() => !!modelId.value && !!versionId.value)
 
+const projectsStore = useProjectsStore()
+
 const model = ref<Model | null>(null)
 const version = ref<ModelVersion | null>(null)
+// The global job list does not carry a project per job, so it falls back to "writable anywhere" (backend enforces)
+const canWrite = computed(() =>
+  hasRouteParams.value ? projectsStore.canWrite(model.value?.project_id) : projectsStore.canCreateModel,
+)
 
 const loading = ref(false)
 const saving = ref(false)
@@ -289,8 +296,9 @@ onMounted(() => {
               :color="item.is_active ? 'success' : 'grey'"
               size="small"
               variant="flat"
-              @click="toggleJobActive(item)"
-              style="cursor: pointer"
+              :link="canWrite"
+              :style="{ cursor: canWrite ? 'pointer' : 'default' }"
+              @click="canWrite && toggleJobActive(item)"
             >
               <v-icon start size="14">
                 {{ item.is_active ? 'mdi-check-circle' : 'mdi-pause-circle' }}
@@ -307,6 +315,7 @@ onMounted(() => {
           <template #item.actions="{ item }">
             <div class="d-flex ga-1">
               <v-btn
+                v-if="canWrite"
                 icon
                 size="small"
                 variant="tonal"
@@ -317,6 +326,7 @@ onMounted(() => {
                 <v-tooltip activator="parent" location="top">Edit</v-tooltip>
               </v-btn>
               <v-btn
+                v-if="canWrite"
                 icon
                 size="small"
                 variant="tonal"
@@ -328,6 +338,7 @@ onMounted(() => {
                 <v-tooltip activator="parent" location="top">Run Now</v-tooltip>
               </v-btn>
               <v-btn
+                v-if="canWrite"
                 icon
                 size="small"
                 variant="tonal"
