@@ -43,7 +43,11 @@ const navigationItems = computed(() => {
   return items
 })
 
+// The layout can mount before the router redirects an anonymous user to /login; avoid 401s until signed in
+const canLoadData = computed(() => authStore.isAuthenticated || !authStore.authEnabled)
+
 async function fetchUnreadCount() {
+  if (!canLoadData.value) return
   try {
     unreadCount.value = await notificationsApi.getUnreadCount()
   } catch (error) {
@@ -52,7 +56,7 @@ async function fetchUnreadCount() {
 }
 
 onMounted(() => {
-  projectsStore.ensureLoaded()
+  if (canLoadData.value) void projectsStore.ensureLoaded()
   fetchUnreadCount()
   pollInterval = window.setInterval(fetchUnreadCount, 30000)
 })

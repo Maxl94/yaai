@@ -7,8 +7,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
@@ -35,7 +33,7 @@ from yaai.server.scheduler import (
     start_job_sync,
 )
 from yaai.server.security_headers import SecurityHeadersMiddleware, security_headers_enabled
-from yaai.server.spa import resolve_static_file
+from yaai.server.spa import mount_spa
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -196,9 +194,4 @@ async def health():
 
 # Serve frontend static files (built by Vite, copied into yaai/server/static in Docker)
 if STATIC_DIR.is_dir():
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        file_path = resolve_static_file(STATIC_DIR, full_path)
-        return FileResponse(file_path or STATIC_DIR / "index.html")
+    mount_spa(app, STATIC_DIR, API_PREFIX)

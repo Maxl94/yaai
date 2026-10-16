@@ -28,11 +28,6 @@ async function remove(modelId: string): Promise<void> {
   await client.delete(`/models/${modelId}`)
 }
 
-async function listVersions(modelId: string): Promise<ModelVersion[]> {
-  const response = await client.get<PaginatedResponse<ModelVersion>>(`/models/${modelId}/versions`)
-  return response.data.data
-}
-
 async function getVersion(modelId: string, versionId: string): Promise<ModelVersion> {
   const response = await client.get<ApiResponse<ModelVersion>>(`/models/${modelId}/versions/${versionId}`)
   return response.data.data
@@ -109,7 +104,6 @@ export const modelsApi = {
   create,
   update,
   delete: remove,
-  listVersions,
   getVersion,
   createVersion,
   updateVersion,
