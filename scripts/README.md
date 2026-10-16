@@ -105,6 +105,27 @@ Demo data generation complete!
 ============================================================
 ```
 
+## llm_monitoring_example.py
+
+Runnable example for [LLM & Agent Monitoring](../docs/llm-monitoring.md). Uses only the SDK and the standard library and sends **metadata only** (token counts, latency, cost, model name, error flag) -- never prompts or completions.
+
+It creates (or reuses) a model, creates a version with the recommended LLM metadata schema, uploads a baseline as reference data, sends a deliberately shifted period (longer prompts, a slower model, more errors), configures the drift job and triggers a run.
+
+```bash
+YAAI_API_KEY=yaam_... python scripts/llm_monitoring_example.py --base-url http://localhost:8000/api/v1 --records 1000
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--base-url` | http://localhost:8000/api/v1 | YAAI API base URL |
+| `--api-key` | env `YAAI_API_KEY` | Service account API key (any value if auth is disabled; without one the SDK uses Google ADC) |
+| `--records` | 1000 | Records per period (baseline and shifted), 1..50000 |
+| `--model-name` | llm-app-metadata | Model name (reused if visible to the key; otherwise choose another name) |
+| `--version` | v1 | Version label (reused if it exists) |
+| `--seed` | 42 | Random seed for the synthetic data |
+
+`llm_reporter_example.py` is the tested batching reporter (`MetadataReporter`, `tracked_call`) embedded in the recipe; it is a library snippet to copy, not a runnable script.
+
 ## Future Modes
 
 Additional modes planned for future implementation:

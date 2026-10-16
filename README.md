@@ -107,6 +107,7 @@ Full documentation is available at **[maxl94.github.io/yaai](https://maxl94.gith
 - [Deployment](https://maxl94.github.io/yaai/deployment/) — Docker Compose, pip install, Google Cloud SQL
 - [Core Concepts](https://maxl94.github.io/yaai/concepts/) — models, versions, schemas, drift detection
 - [Drift Detection Guide](https://maxl94.github.io/yaai/drift-guide/) — deep dive into the four drift metrics
+- [LLM & Agent Monitoring](https://maxl94.github.io/yaai/llm-monitoring/) — metadata-only drift monitoring for LLM apps
 - [REST API Reference](https://maxl94.github.io/yaai/reference/api/) — full OpenAPI spec
 - [Python SDK Reference](https://maxl94.github.io/yaai/reference/sdk/) — async client docs
 
