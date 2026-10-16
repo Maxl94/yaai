@@ -235,25 +235,42 @@ When `CLOUD_SQL_INSTANCE` is set, the connector handles all database connections
 
 ### Run migrations as a Cloud Run Job
 
-The server never migrates on startup, so on GCP run migrations as a **Cloud Run Job** that uses the same image as the service and executes `python -m yaai.server.migrate`. The job connects through the Cloud SQL Connector exactly like the server (same `CLOUD_SQL_*` variables), so no Auth Proxy or VPC tooling is needed.
+The server never migrates on startup, so on GCP run migrations as a **Cloud Run Job** that uses the same image as the service and executes `python -m yaai.server.migrate`. The job connects through the Cloud SQL Connector exactly like the server (same `CLOUD_SQL_*` variables), so no Auth Proxy is needed.
+
+Run the job with the **same service account and database user as the service**. PostgreSQL tables are owned by the user that creates them, so a different migration user would either lock the server out of new tables or be unable to alter the existing ones. If you want a dedicated migration service account anyway, you must set up the roles yourself (e.g. make the migration user a member of the server's role or transfer ownership, and use `ALTER DEFAULT PRIVILEGES` for new objects).
 
 ```bash
-# One-time setup: job with a dedicated service account (roles/cloudsql.client + Cloud SQL Instance User)
+# One-time setup: job with the same service account and settings as the service
 gcloud run jobs create yaai-migrate \
   --image europe-west1-docker.pkg.dev/my-project/yaai/yaai:TAG \
   --command python --args=-m,yaai.server.migrate \
-  --service-account yaai-migrate@my-project.iam.gserviceaccount.com \
-  --set-env-vars CLOUD_SQL_INSTANCE=my-project:us-central1:yaai-db,CLOUD_SQL_USER=yaai-migrate@my-project.iam.gserviceaccount.com,CLOUD_SQL_DATABASE=aimonitoring \
+  --service-account yaai-server@my-project.iam.gserviceaccount.com \
+  --set-env-vars CLOUD_SQL_INSTANCE=my-project:us-central1:yaai-db,CLOUD_SQL_USER=yaai-server@my-project.iam.gserviceaccount.com,CLOUD_SQL_DATABASE=aimonitoring \
   --region us-central1
 ```
 
-In your CD pipeline (e.g. GitHub Actions), update and run the job **before** deploying the new service revision. `--wait` makes the step fail if the migration fails, so the old revision keeps serving:
+> [!NOTE]
+> With `CLOUD_SQL_IP_TYPE=private` or `psc` the job needs the same network access as the service: configure Direct VPC egress (`--network`/`--subnet`) or a Serverless VPC connector (`--vpc-connector`) on the job as well. With `public` no extra networking is required.
 
-```bash
-gcloud run jobs update yaai-migrate --image "$IMAGE" --region us-central1
-gcloud run jobs execute yaai-migrate --region us-central1 --wait
-gcloud run deploy yaai --image "$IMAGE" --region us-central1
+In your CD pipeline, update and run the job **before** deploying the new service revision. `--wait` makes the step fail if the migration fails, so the old revision keeps serving. Example GitHub Actions steps:
+
+```yaml
+- uses: google-github-actions/auth@v2
+  with:
+    workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+    service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
+- uses: google-github-actions/setup-gcloud@v2
+- name: Run database migrations
+  run: |
+    gcloud run jobs update yaai-migrate --image "$IMAGE" --region us-central1
+    gcloud run jobs execute yaai-migrate --region us-central1 --wait
+- name: Deploy service
+  run: gcloud run deploy yaai --image "$IMAGE" --region us-central1
 ```
+
+#### Rollbacks and backward-compatible migrations
+
+On startup the server fails fast if the database is empty or **behind** the application. If the database is **ahead** (it was already migrated by a newer version, e.g. while the old revision still serves traffic or after a traffic rollback), the server only logs a warning and keeps starting. This means migrations must be backward compatible with the previous application version (expand/contract): add columns/tables first, and remove or rename them only in a later release once no older version uses them. `python -m yaai.server.migrate` refuses to run with an older image against a newer database and exits with a clear error.
 
 A Cloud Run Job is preferred over a Cloud Function: it reuses the already built application image (including Alembic and the migration files), so there is no separate packaging or dependency set to maintain, and it can run longer than function timeouts allow.
 
