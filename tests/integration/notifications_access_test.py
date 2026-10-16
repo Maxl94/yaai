@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.integration.auth_separation_test import _create_sa, _grant_access, _make_sa_client
-from tests.integration.conftest import AUTH_CONFIG, PG_AVAILABLE, make_pg_app
+from tests.integration.conftest import AUTH_CONFIG, PG_AVAILABLE, add_default_project_membership, make_pg_app
 from tests.integration.notifications_test import _setup_drifted
 from yaai.server.auth.jwt import create_access_token
 from yaai.server.auth.passwords import hash_password
@@ -97,6 +97,7 @@ async def _make_user_client(pg_session_factory: async_sessionmaker, pg_db: Async
     pg_db.add(user)
     await pg_db.commit()
     await pg_db.refresh(user)
+    await add_default_project_membership(pg_db, user)
     app = make_pg_app(pg_session_factory, AUTH_CONFIG)
     token = create_access_token(AUTH_CONFIG, str(user.id), "viewer")
     transport = ASGITransport(app=app, raise_app_exceptions=False)

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from yaai.schemas.model import DataType, FieldDirection
 from yaai.server.database import Base, UUIDMixin
+from yaai.server.models.project import Project
 
 if TYPE_CHECKING:
     from yaai.server.models.inference import InferenceData, ReferenceData
@@ -19,15 +20,22 @@ if TYPE_CHECKING:
 
 class Model(UUIDMixin, Base):
     __tablename__ = "models"
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_model_project_name"),)
 
-    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    project: Mapped[Project] = relationship(lazy="joined")
     versions: Mapped[list[ModelVersion]] = relationship(back_populates="model", cascade="all, delete-orphan")
+
+    @property
+    def project_name(self) -> str:
+        return self.project.name
 
 
 class ModelVersion(UUIDMixin, Base):

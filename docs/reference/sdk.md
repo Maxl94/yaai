@@ -104,7 +104,7 @@ from yaai.schemas.model import SchemaFieldCreate
 async def main():
     async with YaaiClient("http://localhost:8000/api/v1", api_key="yaam_...") as client:
 
-        # Register a model
+        # Register a model (in the "default" project; pass project_id=... to choose another one)
         model = await client.create_model("fraud-detector")
 
         # Create a version with schema
@@ -151,9 +151,10 @@ asyncio.run(main())
 
 | Method | What it does |
 |---|---|
-| `create_model(name)` | Register a new model |
+| `create_model(name, description=None, project_id=None)` | Register a new model in a project (the `default` project if omitted) |
 | `get_model(model_id)` | Fetch model details |
-| `list_models()` | List all models |
+| `list_models(project_id=None)` | List the models you can access, optionally of one project |
+| `list_projects()` | List the projects you can access, including your role (`my_role`) and model count |
 | `delete_model(model_id)` | Delete a model and all its data |
 | `create_model_version(model_id, version, schema_fields)` | Create a versioned schema |
 | `get_version(model_id, version_id)` | Fetch full version details |
@@ -174,6 +175,12 @@ asyncio.run(main())
 | `validate_schema_batch(schema_fields, records)` | Validate a batch against an inline schema |
 | `validate_model_version_schema(model_id, version_id, inputs, outputs)` | Validate a record against a version's schema |
 | `validate_model_version_schema_batch(model_id, version_id, records)` | Validate a batch against a version's schema |
+
+> **Server version:** `project_id` and `list_projects()` require a server version with projects (introduced together
+> with this SDK release). The SDK does not filter client-side: an older server ignores the `project_id` query
+> parameter of `list_models()` and returns the models of all projects, and `list_projects()` fails with a 404.
+> Upgrade the server before using these features. Model names are unique per project, so look models up by ID (or by
+> name within one project) when the same name can exist in several projects.
 
 ## Full API reference
 

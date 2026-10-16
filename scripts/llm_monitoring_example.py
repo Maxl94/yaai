@@ -226,7 +226,8 @@ async def get_or_create_model(client: YaaiClient, name: str) -> ModelRead:
         ExampleError: If the name is taken by a model that is not visible to the caller.
     """
     for model in await client.list_models():
-        if model.name == name:
+        # Models are created in the default project; names are only unique per project
+        if model.name == name and model.project_name in (None, "default"):
             return model
     try:
         return await client.create_model(name, "LLM application metadata monitoring (no prompt or completion content).")

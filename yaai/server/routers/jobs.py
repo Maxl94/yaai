@@ -50,6 +50,11 @@ async def _notification_reader(identity: CurrentIdentity, db: AsyncSession) -> N
     return NotificationReader("user", user.id, user.created_at)
 
 
+def _is_unlinked_api_key(identity: CurrentIdentity) -> bool:
+    """API keys without a service account see no notifications (and have no read state to maintain)."""
+    return identity.is_service_account and identity.service_account_id is None
+
+
 @router.get("/jobs/{job_id}")
 async def get_job(
     job_id: uuid.UUID,
@@ -197,9 +202,9 @@ async def list_notifications(
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    model_ids = await get_accessible_model_ids(identity, db)
-    if model_ids == []:
+    if _is_unlinked_api_key(identity):
         return {"data": [], "meta": PaginationMeta(total=0, page=page, page_size=page_size)}
+    model_ids = await get_accessible_model_ids(identity, db)
     svc = JobService(db)
     notifications, total = await svc.list_notifications(
         is_read, model_version_id, page, page_size, model_ids=model_ids, reader=await _notification_reader(identity, db)
@@ -229,9 +234,9 @@ async def mark_all_read(
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    model_ids = await get_accessible_model_ids(identity, db)
-    if model_ids == []:
+    if _is_unlinked_api_key(identity):
         return {"data": {"marked_read": 0}}
+    model_ids = await get_accessible_model_ids(identity, db)
     svc = JobService(db)
     count = await svc.mark_all_notifications_read(model_ids=model_ids, reader=await _notification_reader(identity, db))
     return {"data": {"marked_read": count}}

@@ -24,6 +24,7 @@ from yaai.server.scheduler import (
     sync_jobs,
     unregister_job,
 )
+from yaai.server.services.project_service import get_or_create_default_project
 
 
 class AsyncContextManager:
@@ -259,7 +260,8 @@ class TestSchedulerSync:
 
     @staticmethod
     async def _add_job(db, name="Job", schedule="0 2 * * *", is_active=True) -> JobConfig:
-        model = Model(name=f"m-{uuid.uuid4()}")
+        project = await get_or_create_default_project(db)
+        model = Model(name=f"m-{uuid.uuid4()}", project_id=project.id)
         db.add(model)
         await db.flush()
         version = ModelVersion(model_id=model.id, version="1")

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import Uuid, exists, func, literal, or_, select, update
+from sqlalchemy import Select, Uuid, exists, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,7 +95,7 @@ class JobService:
         return list(result.scalars().all())
 
     async def list_all_jobs(
-        self, page: int = 1, page_size: int = 20, model_ids: list[uuid.UUID] | None = None
+        self, page: int = 1, page_size: int = 20, model_ids: Select | None = None
     ) -> tuple[list[JobConfig], int]:
         """List all jobs across all model versions with pagination."""
         query = select(JobConfig)
@@ -192,7 +192,7 @@ class JobService:
         return enriched_results, total
 
     async def get_drift_overview(
-        self, page: int = 1, page_size: int = 10, model_ids: list[uuid.UUID] | None = None
+        self, page: int = 1, page_size: int = 10, model_ids: Select | None = None
     ) -> tuple[list[dict], int]:
         """Build a per-model drift health summary for all models with active versions."""
 
@@ -314,7 +314,7 @@ class JobService:
         model_version_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
-        model_ids: list[uuid.UUID] | None = None,
+        model_ids: Select | None = None,
         reader: NotificationReader | None = None,
     ) -> tuple[list[NotificationRead], int]:
         """List notifications with optional read-status and model-version filters.
@@ -392,7 +392,7 @@ class JobService:
         return result
 
     async def mark_all_notifications_read(
-        self, *, model_ids: list[uuid.UUID] | None = None, reader: NotificationReader | None = None
+        self, *, model_ids: Select | None = None, reader: NotificationReader | None = None
     ) -> int:
         """Mark all unread notifications as read for the reader with one set-based statement.
 

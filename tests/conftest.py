@@ -25,6 +25,7 @@ from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models import inference as _inference_models  # noqa: F401
 from yaai.server.models import job as _job_models  # noqa: F401
 from yaai.server.models import model as _model_models  # noqa: F401
+from yaai.server.models import project as _project_models  # noqa: F401
 from yaai.server.models.auth import UserRole
 
 # Prevent all auth BaseSettings classes from reading .env during tests.

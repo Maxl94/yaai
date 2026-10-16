@@ -7,7 +7,7 @@ import uuid
 import jwt as pyjwt
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, Select, false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.server.auth.config import AuthConfig
@@ -16,7 +16,8 @@ from yaai.server.auth.service_auth import validate_api_key, validate_google_sa_t
 from yaai.server.database import get_db
 from yaai.server.models.auth import ModelAccess, User, UserRole
 from yaai.server.models.job import JobConfig
-from yaai.server.models.model import ModelVersion
+from yaai.server.models.model import Model, ModelVersion
+from yaai.server.models.project import WRITE_ROLES, Project, ProjectMembership, ProjectRole
 
 # Global auth config reference, set at startup
 _auth_config: AuthConfig | None = None
@@ -222,40 +223,80 @@ def require_owner_or_service_account(
     return identity
 
 
-async def require_model_write(
-    model_id: uuid.UUID,
-    identity: CurrentIdentity = Depends(require_auth),
-    db: AsyncSession = Depends(get_db),
-) -> CurrentIdentity:
-    """Require write access for a specific model.
+def has_global_access(identity: CurrentIdentity) -> bool:
+    """True if authentication is disabled or the identity is a global owner (super-admin)."""
+    return not get_auth_config().enabled or identity.is_owner
 
-    Owner → always allowed.
-    Service account (API key or Google SA) → only if whitelisted for this model.
-    Viewer → denied.
+
+def _membership_filter(identity: CurrentIdentity) -> ColumnElement[bool] | None:
+    """Membership rows of the identity (user or service account), None if it has no usable ID."""
+    principal_id = identity.service_account_id if identity.is_service_account else identity.user_id
+    if principal_id is None:
+        return None
+    column = ProjectMembership.service_account_id if identity.is_service_account else ProjectMembership.user_id
+    return column == uuid.UUID(principal_id)
+
+
+async def get_project_roles(identity: CurrentIdentity, db: AsyncSession) -> dict[uuid.UUID, ProjectRole]:
+    """Return the project roles granted to the identity through memberships (empty for global access).
+
+    Global owners and disabled authentication are not expressed as memberships; callers must check
+    ``has_global_access`` first if they need the effective role.
     """
-    config = get_auth_config()
-    if not config.enabled:
-        return identity
-    if identity.is_owner:
-        return identity
-    if identity.role == UserRole.VIEWER and not identity.is_service_account:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Viewers cannot modify resources")
-    if identity.is_service_account:
-        sa_id = identity.service_account_id
-        if sa_id is None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Service account identity missing")
-        stmt = select(ModelAccess).where(
-            ModelAccess.model_id == model_id,
-            ModelAccess.service_account_id == uuid.UUID(sa_id),
-        )
-        result = await db.execute(stmt)
-        if result.scalar_one_or_none() is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Service account not whitelisted for this model",
-            )
-        return identity
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    membership_filter = _membership_filter(identity)
+    if membership_filter is None:
+        return {}
+    result = await db.execute(select(ProjectMembership.project_id, ProjectMembership.role).where(membership_filter))
+    return dict(result.tuples().all())
+
+
+async def get_project_role(identity: CurrentIdentity, project_id: uuid.UUID, db: AsyncSession) -> ProjectRole | None:
+    """Effective role of the identity in a project, or None if it has no access.
+
+    Single source of truth for project permissions. Disabled authentication and global owners
+    are treated as project owners; everybody else needs a membership (users and service accounts alike).
+    """
+    if has_global_access(identity):
+        return ProjectRole.OWNER
+    membership_filter = _membership_filter(identity)
+    if membership_filter is None:
+        return None
+    result = await db.execute(
+        select(ProjectMembership.role).where(ProjectMembership.project_id == project_id, membership_filter)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_project_role_for_model(
+    identity: CurrentIdentity, model_id: uuid.UUID, db: AsyncSession
+) -> ProjectRole | None:
+    """Effective role of the identity in the project that contains the model.
+
+    Raises:
+        HTTPException: 404 if the model does not exist.
+    """
+    if has_global_access(identity):
+        return ProjectRole.OWNER
+    project_id = (await db.execute(select(Model.project_id).where(Model.id == model_id))).scalar_one_or_none()
+    if project_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
+    return await get_project_role(identity, project_id, db)
+
+
+def _reject_service_account_without_id(identity: CurrentIdentity) -> None:
+    if identity.is_service_account and identity.service_account_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Service account identity missing")
+
+
+async def _service_account_has_model_access(identity: CurrentIdentity, model_id: uuid.UUID, db: AsyncSession) -> bool:
+    """Whether the service account is whitelisted for the model through a ModelAccess entry."""
+    sa_id = identity.service_account_id
+    if not identity.is_service_account or sa_id is None:
+        return False
+    stmt = select(ModelAccess.id).where(
+        ModelAccess.model_id == model_id, ModelAccess.service_account_id == uuid.UUID(sa_id)
+    )
+    return (await db.execute(stmt)).first() is not None
 
 
 async def check_model_write_access(
@@ -265,32 +306,56 @@ async def check_model_write_access(
 ) -> None:
     """Check write access for a specific model. Raises HTTPException if denied.
 
+    Global owner -> always allowed.
+    Users -> editor or owner role in the model's project.
+    Service accounts -> whitelisted via ModelAccess, or editor/owner role in the model's project.
+
     Use this in endpoint functions where model_id is not a path parameter
     (e.g. resolved from request body).
     """
-    config = get_auth_config()
-    if not config.enabled:
+    if has_global_access(identity):
         return
-    if identity.is_owner:
+    _reject_service_account_without_id(identity)
+    role = await get_project_role_for_model(identity, model_id, db)
+    if role in WRITE_ROLES or await _service_account_has_model_access(identity, model_id, db):
         return
-    if identity.role == UserRole.VIEWER and not identity.is_service_account:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Viewers cannot modify resources")
     if identity.is_service_account:
-        sa_id = identity.service_account_id
-        if sa_id is None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Service account identity missing")
-        stmt = select(ModelAccess).where(
-            ModelAccess.model_id == model_id,
-            ModelAccess.service_account_id == uuid.UUID(sa_id),
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Service account not whitelisted for this model"
         )
-        result = await db.execute(stmt)
-        if result.scalar_one_or_none() is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Service account not whitelisted for this model",
-            )
-        return
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if role is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to the project of this model")
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Viewers cannot modify resources")
+
+
+async def require_model_write(
+    model_id: uuid.UUID,
+    identity: CurrentIdentity = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentIdentity:
+    """Require write access for the model in the ``model_id`` path parameter (see check_model_write_access)."""
+    await check_model_write_access(model_id, identity, db)
+    return identity
+
+
+async def require_project_admin(
+    project_id: uuid.UUID,
+    identity: CurrentIdentity = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentIdentity:
+    """Require permission to manage a project: global owner or project owner (users only).
+
+    Raises:
+        HTTPException: 404 if the project does not exist, 403 if the identity may not manage it.
+    """
+    if has_global_access(identity):
+        return identity
+    if await db.get(Project, project_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    role = await get_project_role(identity, project_id, db)
+    if identity.is_service_account or role != ProjectRole.OWNER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project owner access required")
+    return identity
 
 
 async def resolve_model_id_from_version(model_version_id: uuid.UUID, db: AsyncSession) -> uuid.UUID:
@@ -324,27 +389,21 @@ async def check_model_read_access(
 ) -> None:
     """Check read access for a specific model. Raises HTTPException if denied.
 
-    Non-SA identities (users): always allowed.
-    Service accounts: only allowed if whitelisted via ModelAccess.
+    Global owner -> always allowed.
+    Users -> any role in the model's project.
+    Service accounts -> whitelisted via ModelAccess, or any role in the model's project.
     """
-    config = get_auth_config()
-    if not config.enabled:
+    if has_global_access(identity):
         return
-    if not identity.is_service_account:
+    _reject_service_account_without_id(identity)
+    role = await get_project_role_for_model(identity, model_id, db)
+    if role is not None or await _service_account_has_model_access(identity, model_id, db):
         return
-    sa_id = identity.service_account_id
-    if sa_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Service account identity missing")
-    stmt = select(ModelAccess).where(
-        ModelAccess.model_id == model_id,
-        ModelAccess.service_account_id == uuid.UUID(sa_id),
-    )
-    result = await db.execute(stmt)
-    if result.scalar_one_or_none() is None:
+    if identity.is_service_account:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Service account not whitelisted for this model",
+            status_code=status.HTTP_403_FORBIDDEN, detail="Service account not whitelisted for this model"
         )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to the project of this model")
 
 
 async def check_version_read_access(
@@ -369,22 +428,28 @@ async def check_version_read_access(
 async def get_accessible_model_ids(
     identity: CurrentIdentity,
     db: AsyncSession,
-) -> list[uuid.UUID] | None:
-    """Return the list of model IDs a service account can access, or None if no filtering needed.
+) -> Select | None:
+    """Return a subquery of the model IDs the identity may read, or None if no filtering is needed.
 
-    Non-SA identities: returns None (no filtering).
-    Service accounts: returns list of model_ids from ModelAccess.
+    Pass the result to ``.in_()``; it is evaluated inside the database, not materialized in Python.
+    ``db`` is unused and only kept for call-site symmetry with the other access helpers.
+
+    Global owners (and disabled authentication): None (no filtering).
+    Users: models of the projects they are a member of.
+    Service accounts: models they are whitelisted for (ModelAccess) plus models of their projects.
     """
-    config = get_auth_config()
-    if not config.enabled:
+    if has_global_access(identity):
         return None
-    if not identity.is_service_account:
-        return None
-    sa_id = identity.service_account_id
-    if sa_id is None:
-        return []
-    stmt = select(ModelAccess.model_id).where(
-        ModelAccess.service_account_id == uuid.UUID(sa_id),
-    )
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+    membership_filter = _membership_filter(identity)
+    if membership_filter is None:
+        return select(Model.id).where(false())
+    conditions = [Model.project_id.in_(select(ProjectMembership.project_id).where(membership_filter))]
+    if identity.is_service_account:
+        conditions.append(
+            Model.id.in_(
+                select(ModelAccess.model_id).where(
+                    ModelAccess.service_account_id == uuid.UUID(identity.service_account_id)
+                )
+            )
+        )
+    return select(Model.id).where(or_(*conditions))

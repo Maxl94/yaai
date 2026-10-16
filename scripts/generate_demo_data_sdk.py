@@ -253,7 +253,8 @@ async def generate_dataset(
     existing_models = await client.list_models()
     api_model = None
     for m in existing_models:
-        if m.name == config["model_name"]:
+        # Models are created in the default project; names are only unique per project
+        if m.name == config["model_name"] and m.project_name in (None, "default"):
             print(f"  Found existing model: {m.id}")
             api_model = m
             break

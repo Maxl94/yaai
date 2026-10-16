@@ -31,6 +31,7 @@ from yaai.schemas.model import (
     ValidateSchemaRequest,
     ValidationResult,
 )
+from yaai.schemas.project import ProjectRead
 
 
 class YaaiClient:
@@ -183,18 +184,31 @@ class YaaiClient:
 
     # -- Models --
 
-    async def create_model(self, name: str, description: str | None = None) -> ModelRead:
-        payload = ModelCreate(name=name, description=description)
-        resp = await self._request("POST", "/models", json=payload.model_dump())
+    async def create_model(
+        self,
+        name: str,
+        description: str | None = None,
+        project_id: uuid.UUID | None = None,
+    ) -> ModelRead:
+        """Create a model, optionally inside a project (the default project if omitted)."""
+        payload = ModelCreate(name=name, description=description, project_id=project_id)
+        resp = await self._request("POST", "/models", json=payload.model_dump(mode="json"))
         return ModelRead.model_validate(resp.json()["data"])
 
     async def get_model(self, model_id: uuid.UUID) -> ModelRead:
         resp = await self._request("GET", f"/models/{model_id}")
         return ModelRead.model_validate(resp.json()["data"])
 
-    async def list_models(self) -> list[ModelRead]:
-        resp = await self._request("GET", "/models")
+    async def list_models(self, project_id: uuid.UUID | None = None) -> list[ModelRead]:
+        """List the models you can access, optionally restricted to one project."""
+        params = {"project_id": str(project_id)} if project_id is not None else None
+        resp = await self._request("GET", "/models", params=params)
         return [ModelRead.model_validate(m) for m in resp.json()["data"]]
+
+    async def list_projects(self) -> list[ProjectRead]:
+        """List the projects you can access, including your role (``my_role``) and model counts."""
+        resp = await self._request("GET", "/projects")
+        return [ProjectRead.model_validate(p) for p in resp.json()["data"]]
 
     async def delete_model(self, model_id: uuid.UUID) -> None:
         await self._request("DELETE", f"/models/{model_id}")

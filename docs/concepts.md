@@ -1,10 +1,39 @@
 # Core Concepts
 
-YAAI has a small surface area. There are five things to understand, and they chain together linearly.
+YAAI has a small surface area. There are six things to understand, and they chain together linearly.
 
 ## Models
 
 A model represents a deployed ML system. "Fraud detector", "churn predictor", "price estimator" -- one entry per thing you want to monitor. It's just a name and a description.
+
+## Projects
+
+Every model belongs to exactly one **project**. Projects are the unit of access control: who can see and change a model is decided by the user's role in the model's project. Model names are unique *per project*, so two teams can both have a "churn-predictor".
+
+A fresh installation (and every upgraded one) contains a project named `default`. Models created without an explicit `project_id` -- for example by older SDK scripts -- land there. The `default` project cannot be renamed or deleted.
+
+Only global owners can create or delete projects (and only empty ones can be deleted). Models can be moved to another project by global owners only; names must not clash in the target project.
+
+### Roles
+
+Access combines the **global role** of a user with their **project role**:
+
+| Capability | Global owner | Project owner | Project editor | Project viewer | Not a member |
+|---|---|---|---|---|---|
+| Access all projects and models | yes | no | no | no | no |
+| Read models, versions, dashboards, drift results, jobs, notifications | yes | yes | yes | yes | no |
+| Create models, versions, log inferences, upload reference data, edit/trigger jobs | yes | yes | yes | no | no |
+| Manage project members, rename the project | yes | yes | no | no | no |
+| Create / delete projects | yes | no | no | no | no |
+| Move models between projects, delete models, list raw inferences | yes | no | no | no | no |
+
+A global **viewer** is a regular user whose access comes entirely from project memberships. New users -- including users that are auto-created on their first Google login -- see no models until a project owner or global owner adds them to a project.
+
+Service accounts keep their per-model access (`model_access`) and can additionally be added to a project with a role. They may read/write a model if either grants it. Service accounts without a membership may still create models in the `default` project and are granted per-model access to them, so existing SDK scripts keep working. When a service account creates a model through a project membership (editor), no per-model grant is added, so removing the membership removes the access. Service accounts can be project editors or viewers but not project owners.
+
+The project name `default` is reserved. A project owner cannot remove or demote the last owner of a project (409); global owners can.
+
+Memberships are always checked against the database, so changes take effect immediately.
 
 ## Versions
 
@@ -118,9 +147,9 @@ YAAI supports four auth methods:
 
 - **Local accounts** -- username + password, enabled by default. An admin account is created on first startup with a randomly generated password (written to a 0600 file, never logged -- see [Server Setup](server-setup.md#default-admin-account)). Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
 - **Google OAuth** -- for human users via browser. Disabled by default. When enabled, local auth is automatically disabled.
-- **API keys** -- for service accounts and SDK clients (`X-API-Key: yaam_...`). Enabled by default. Keys are scoped per-model.
+- **API keys** -- for service accounts and SDK clients (`X-API-Key: yaam_...`). Enabled by default. Keys are scoped per-model and/or per-project.
 - **Google service accounts** -- for GCP workloads using Application Default Credentials and ID token verification.
 
-Two roles exist: **owner** (full admin access) and **viewer** (read-only).
+Two global roles exist: **owner** (super-admin with full access to every project) and **viewer** (a regular user whose access comes from [project memberships](#projects)).
 
 Configure auth via environment variables (all prefixed with `AUTH_`). See the [Server Setup guide](server-setup.md#6-authentication) for details.
