@@ -26,7 +26,13 @@ from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, User, UserRole
 from yaai.server.rate_limit import limiter
 from yaai.server.routers import auth, dashboard, inferences, jobs, models, schema
-from yaai.server.scheduler import load_active_jobs, scheduler, scheduler_enabled
+from yaai.server.scheduler import (
+    load_active_jobs,
+    scheduler,
+    scheduler_enabled,
+    scheduler_sync_interval_seconds,
+    start_job_sync,
+)
 from yaai.server.security_headers import SecurityHeadersMiddleware, security_headers_enabled
 from yaai.server.spa import resolve_static_file
 
@@ -43,13 +49,15 @@ async def _bootstrap_admin() -> None:
     """Create a default admin user if the users table is empty.
 
     Uses BOOTSTRAP_ADMIN_PASSWORD if set, otherwise generates a random password and
-    stores it in a 0600 file (never logged). The admin should change it after first login.
+    stores it in a new 0600 file (never logged; stderr only as a one-time fallback).
+    The admin should change it after first login.
     """
     async with database.async_session() as db:
         result = await db.execute(select(User).limit(1))
         if result.scalars().first() is not None:
             return
 
+        # Deliver the password before creating the user so a failure never leaves an admin with an unknown password
         password, generated = resolve_admin_password()
         admin = User(
             username="admin",
@@ -57,11 +65,15 @@ async def _bootstrap_admin() -> None:
             role=UserRole.OWNER,
             auth_provider=AuthProvider.LOCAL,
         )
+        password_file = deliver_generated_password(password) if generated else None
         db.add(admin)
-        await db.commit()
-        if generated:
-            deliver_generated_password(password)
-        else:
+        try:
+            await db.commit()
+        except Exception:
+            if password_file is not None:
+                password_file.unlink(missing_ok=True)
+            raise
+        if not generated:
             logger.info("Created default admin account (username: admin) with BOOTSTRAP_ADMIN_PASSWORD.")
 
 
@@ -108,11 +120,12 @@ async def lifespan(app: FastAPI):
     if auth_config.enabled and auth_config.local_enabled:
         await _bootstrap_admin()
 
-    # Start job scheduler (disable with SCHEDULER_ENABLED=false on all but one instance)
+    # Start job scheduler (SCHEDULER_ENABLED=false for API-only instances)
     if scheduler_enabled():
         logger.info("Loading active jobs ...")
         async with database.async_session() as db:
             await load_active_jobs(db)
+        start_job_sync(scheduler_sync_interval_seconds())
         scheduler.start()
     else:
         logger.info("SCHEDULER_ENABLED is false — scheduled jobs will not run on this instance.")
@@ -162,7 +175,7 @@ app.add_middleware(SessionMiddleware, secret_key=_session_secret)
 
 # Added last so it wraps every other middleware and response
 if security_headers_enabled():
-    app.add_middleware(SecurityHeadersMiddleware, base_url=settings.base_url)
+    app.add_middleware(SecurityHeadersMiddleware, base_url=settings.base_url, docs_enabled=_docs_enabled)
 
 # Routers
 API_PREFIX = "/api/v1"

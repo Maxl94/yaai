@@ -91,13 +91,14 @@ includes a `sample_info` object:
 | `AUTH_JWT_SECRET` | *(none)* | JWT signing secret. **Required in production** (ephemeral secret in development). |
 | `SESSION_SECRET` | *(none)* | Session/OAuth state secret. **Required in production** (ephemeral secret in development). |
 | `BOOTSTRAP_ADMIN_PASSWORD` | *(generated)* | Initial `admin` password, min. 12 characters. |
-| `BOOTSTRAP_ADMIN_PASSWORD_FILE` | `./admin-initial-password.txt` | File (mode `0600`) receiving the generated initial admin password. The password is never logged. |
+| `BOOTSTRAP_ADMIN_PASSWORD_FILE` | `./admin-initial-password.txt` | New file (mode `0600`, never overwritten) receiving the generated initial admin password. The password is never logged; if the file cannot be created it is printed once to stderr. |
 | `API_DOCS_ENABLED` | `true` / `false` in production | Expose `/docs`, `/redoc` and `/openapi.json`. |
 | `SECURITY_HEADERS_ENABLED` | `true` | Add CSP, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and HSTS (over HTTPS). |
 | `RATE_LIMIT_ENABLED` | `true` | Enable rate limiting. |
-| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `0` | Trusted reverse proxies in front of the server; `1` on Cloud Run. Client IP is the N-th `X-Forwarded-For` entry from the right. |
+| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `0` | Trusted reverse proxies in front of the server; `1` on Cloud Run accessed directly, typically `2` behind an external HTTPS load balancer. Client IP is the N-th `X-Forwarded-For` entry from the right. |
 | `RATE_LIMIT_STORAGE_URI` | `memory://` | Rate limit storage backend, e.g. `redis://host:6379` (the Redis client must be installed separately). |
-| `SCHEDULER_ENABLED` | `true` | Run the drift job scheduler in this instance. |
+| `SCHEDULER_ENABLED` | `true` | Run the drift job scheduler in this instance. Use `false` for API-only instances/services. |
+| `SCHEDULER_SYNC_INTERVAL_SECONDS` | `60` | How often the scheduler reloads active jobs from the database, so job changes made on other instances take effect. |
 
 See [Deployment](deployment.md#running-multiple-instances) for running more than one instance.
 

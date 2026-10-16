@@ -41,11 +41,13 @@ class SecurityHeadersMiddleware:
     """Pure ASGI middleware adding security headers to every HTTP response.
 
     Headers already set by the application are never overwritten. HSTS is sent when BASE_URL
-    is https or the request itself arrived over https.
+    is https or the request itself arrived over https. The relaxed docs CSP is only used for
+    /docs and /redoc when the API docs are enabled; otherwise those paths fall through to the SPA.
     """
 
-    def __init__(self, app: ASGIApp, base_url: str = "") -> None:
+    def __init__(self, app: ASGIApp, base_url: str = "", docs_enabled: bool = False) -> None:
         self.app = app
+        self.docs_enabled = docs_enabled
         self.force_hsts = base_url.lower().startswith("https://")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -54,7 +56,7 @@ class SecurityHeadersMiddleware:
             return
 
         path = scope.get("path", "")
-        is_docs = path in DOCS_PATHS
+        is_docs = self.docs_enabled and path in DOCS_PATHS
         add_hsts = self.force_hsts or scope.get("scheme") == "https"
 
         async def send_with_headers(message: Message) -> None:

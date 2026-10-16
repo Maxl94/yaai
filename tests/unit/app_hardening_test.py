@@ -31,11 +31,12 @@ def test_prod_hides_api_docs_and_sets_security_headers():
     result = _run(ENVIRONMENT="production", SESSION_SECRET="a-strong-session-secret")  # noqa: S106
 
     assert result.returncode == 0, result.stderr
-    status_line, docs_line, health_line, _ = result.stdout.strip().splitlines()
+    status_line, docs_line, health_line, docs_csp = result.stdout.strip().splitlines()
     # A built frontend may answer unknown paths with index.html (200); the docs must never be served.
     assert status_line.split()[:2] in (["404", "404"], ["200", "200"])
     assert docs_line == "False False"
     assert health_line.startswith("nosniff | default-src 'self'")
+    assert "cdn.jsdelivr.net" not in docs_csp
 
 
 def test_dev_serves_api_docs_with_relaxed_csp():

@@ -13,8 +13,8 @@ Before going live, make sure you've set these:
 - **`BASE_URL`** -- your public URL (e.g. `https://yaai.mycompany.com`). Used for CORS, OAuth redirects, and service account audience.
 - **`DATABASE_URL`** -- point to a managed PostgreSQL instance with strong credentials (not `changeme`)
 - **`AUTH_JWT_SECRET`** and **`SESSION_SECRET`** -- **required** in production; the server refuses to start without them (a missing secret would silently log users out on every restart and break multiple instances). Generate with `openssl rand -base64 32`.
-- **`BOOTSTRAP_ADMIN_PASSWORD`** -- recommended for the first start (min. 12 characters). Otherwise a password is generated and written to a `0600` file (`BOOTSTRAP_ADMIN_PASSWORD_FILE`), never to the log.
-- **`RATE_LIMIT_TRUSTED_PROXY_HOPS`** -- set to the number of reverse proxies in front of YAAI (`1` on Cloud Run), otherwise all users share one rate-limit bucket.
+- **`BOOTSTRAP_ADMIN_PASSWORD`** -- recommended for the first start (min. 12 characters); **effectively required on Cloud Run**, where you cannot read files inside an instance. Otherwise a password is generated and written to a new `0600` file (`BOOTSTRAP_ADMIN_PASSWORD_FILE`, never overwritten) and never to the log. Only if that file cannot be created is the password printed once to stderr, which in containers usually means the log stream -- avoid this by setting the variable or pointing the file to a writable path. The admin account is only created after the password has been delivered.
+- **`RATE_LIMIT_TRUSTED_PROXY_HOPS`** -- set to the number of reverse proxies in front of YAAI, otherwise all users share one rate-limit bucket: `1` when Cloud Run is accessed directly, typically `2` behind an external HTTPS load balancer (which sends `X-Forwarded-For: <client>, <load-balancer-ip>`). Check the header your deployment actually receives.
 - **API docs** -- `/docs`, `/redoc` and `/openapi.json` are disabled in production. Set `API_DOCS_ENABLED=true` to expose them.
 
 ## Docker Compose
@@ -316,14 +316,21 @@ YAAI is designed as a single instance, but can run several (for example Cloud Ru
 |---|---|---|
 | `AUTH_JWT_SECRET`, `SESSION_SECRET` | Required in production; tokens and OAuth state signed by one instance must validate on all others | Use the **same** values on every instance (Secret Manager) |
 | Rate limiting | Counters live in memory per instance, so the effective limit is multiplied by the instance count | Set `RATE_LIMIT_STORAGE_URI=redis://host:6379` (install the Redis client, e.g. `pip install redis`; it is not a YAAI dependency) |
-| Client IP | Behind a proxy every user may share its IP | Set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (`1` on Cloud Run) |
+| Client IP | Behind a proxy every user may share its IP | Set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (`1` on Cloud Run accessed directly, typically `2` behind an external HTTPS load balancer) |
 | OAuth code store and token caches | Kept in memory per instance | Use session affinity, or run a single instance |
-| Scheduled drift jobs | Every instance runs its own scheduler, so each cron job fires N times | A PostgreSQL advisory lock makes an overlapping execution on another instance skip. For strictly one run per schedule set `SCHEDULER_ENABLED=false` on all but one instance |
+| Scheduled drift jobs | Every instance with `SCHEDULER_ENABLED=true` runs its own in-memory scheduler, so each cron job fires on every such instance | A PostgreSQL advisory lock makes an overlapping execution on another instance skip. Every scheduler re-reads the active jobs from the database every `SCHEDULER_SYNC_INTERVAL_SECONDS` (default `60`), so creating, rescheduling, pausing or deleting a job on any instance reaches all schedulers within that interval |
 
-The advisory lock only prevents jobs from running **concurrently**; if one instance finishes before another instance's trigger fires, the job can still run twice. `SCHEDULER_ENABLED=false` on all but one instance is the reliable option. The lock is skipped on non-PostgreSQL databases.
+The advisory lock only prevents jobs from running **concurrently**; if one instance finishes before another instance's trigger fires, the job can still run twice. The lock is skipped on non-PostgreSQL databases. A job needs one database connection for its whole run (the lock is held on the connection that runs the job).
+
+Job changes made through the API are applied immediately on the instance that served the request and on all other schedulers at the next reconciliation (at most `SCHEDULER_SYNC_INTERVAL_SECONDS` later). Reconciliation only runs where `SCHEDULER_ENABLED=true`.
+
+Two supported layouts:
+
+- **Scheduler on every instance** (simplest): keep `SCHEDULER_ENABLED=true` everywhere. The advisory lock prevents overlapping runs and reconciliation keeps all schedules in sync.
+- **Dedicated scheduler service**: deploy the same image twice, the API service with `SCHEDULER_ENABLED=false` and a scheduler service with `SCHEDULER_ENABLED=true` and a single instance. On Cloud Run all instances of a service share the same environment variables, so "disabled on all but one instance" is only possible with two services.
 
 > [!IMPORTANT]
-> **Cloud Run:** the scheduler runs inside the server process and needs CPU outside of requests. Use **"CPU always allocated"** (`--no-cpu-throttling`) and a minimum of one instance (`--min-instances=1`), and run the scheduler on one instance only (`SCHEDULER_ENABLED`). If you cannot guarantee this, run with `--min-instances=1 --max-instances=1`.
+> **Cloud Run:** the scheduler runs inside the server process and needs CPU outside of requests. Use **"CPU always allocated"** (`--no-cpu-throttling`) and a minimum of one instance (`--min-instances=1`) for every service that runs the scheduler.
 
 ## Troubleshooting
 

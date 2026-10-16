@@ -23,9 +23,9 @@ async def _custom_csp(request):
     return PlainTextResponse("ok", headers={"Content-Security-Policy": "default-src 'none'"})
 
 
-def _make_app(base_url: str = "http://localhost:8000") -> Starlette:
-    app = Starlette(routes=[Route("/", _ok), Route("/docs", _ok), Route("/custom", _custom_csp)])
-    app.add_middleware(SecurityHeadersMiddleware, base_url=base_url)
+def _make_app(base_url: str = "http://localhost:8000", docs_enabled: bool = True) -> Starlette:
+    app = Starlette(routes=[Route("/", _ok), Route("/docs", _ok), Route("/redoc", _ok), Route("/custom", _custom_csp)])
+    app.add_middleware(SecurityHeadersMiddleware, base_url=base_url, docs_enabled=docs_enabled)
     return app
 
 
@@ -48,6 +48,21 @@ async def test_spa_csp_forbids_inline_scripts_and_framing():
     assert "script-src 'self';" in SPA_CSP
     assert "frame-ancestors 'none'" in SPA_CSP
     assert "object-src 'none'" in SPA_CSP
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc"])
+async def test_docs_get_strict_csp_when_docs_disabled(path):
+    # With docs disabled these paths serve the SPA, which must never run under the relaxed CSP.
+    resp = await _get(_make_app(docs_enabled=False), path)
+
+    assert resp.headers["content-security-policy"] == SPA_CSP
+
+
+async def test_docs_disabled_is_the_default():
+    app = Starlette(routes=[Route("/docs", _ok)])
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    assert (await _get(app, "/docs")).headers["content-security-policy"] == SPA_CSP
 
 
 async def test_docs_get_relaxed_csp():
