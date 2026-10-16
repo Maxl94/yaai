@@ -65,6 +65,11 @@ const router = createRouter({
       component: () => import('@/pages/NotificationsPage.vue'),
     },
     {
+      path: '/projects',
+      name: 'projects',
+      component: () => import('@/pages/ProjectsPage.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/pages/SettingsPage.vue'),
