@@ -35,6 +35,14 @@ The project name `default` is reserved. A project owner cannot remove or demote 
 
 Memberships are always checked against the database, so changes take effect immediately.
 
+### Projects in the web UI
+
+- **Project switcher** -- the bar at the top of every page lists "All projects" plus the projects you can access. The Models page is filtered by the selected project; the choice is remembered in the browser.
+- **Projects page** (`Projects` in the navigation, shown when authentication is enabled) -- lists your projects with model count and your role. Global owners can create, edit and delete projects (the `default` project and non-empty projects cannot be deleted). Project owners can edit their project and manage its members: add users by username, change roles and remove members. Global owners can also pick users and service accounts from a list. Other users see their projects read-only.
+- **Creating models** -- the "New Model" button is available to global owners and to editors/owners of at least one project; the dialog lets you choose the target project.
+- **Model details** -- show the model's project; global owners get a "Move to project" action. Edit, new version, schema, job and threshold actions are only shown to editors and owners of the model's project (the backend enforces the same rules).
+- **Global user management** (users and service accounts) stays in *Settings* and is available to global owners only.
+
 ## Versions
 
 A model version pins a specific input/output contract. When your model's features change -- new input field, different output format, removed a column -- create a new version. This keeps historical data and drift results clean: version v1.0 results are never mixed with v2.0 data.

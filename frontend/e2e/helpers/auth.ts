@@ -43,6 +43,8 @@ export interface SeedData {
   sa2: { id: string; key: string; name: string }
   model_a: { id: string; name: string }
   model_b: { id: string; name: string }
+  other_project: { id: string; name: string }
+  hidden_model: { id: string; name: string }
   version_a: { id: string; version: string }
   job_a: { id: string }
 }
