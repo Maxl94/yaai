@@ -14,7 +14,7 @@ from yaai.server.auth.config import AuthConfig
 from yaai.server.auth.jwt import decode_token
 from yaai.server.auth.service_auth import validate_api_key, validate_google_sa_token, validate_google_user_token
 from yaai.server.database import get_db
-from yaai.server.models.auth import ModelAccess, UserRole
+from yaai.server.models.auth import ModelAccess, User, UserRole
 from yaai.server.models.job import JobConfig
 from yaai.server.models.model import ModelVersion
 
@@ -63,19 +63,35 @@ class CurrentIdentity:
         return self.identity_type in ("api_key", "google_sa")
 
 
-async def _try_jwt(config: AuthConfig, token: str) -> CurrentIdentity | None:
-    """Try to decode a JWT access token."""
+async def _try_jwt(config: AuthConfig, token: str, db: AsyncSession) -> CurrentIdentity | None:
+    """Try to decode a JWT access token and resolve the user from the database.
+
+    Returns None if the token is not a valid access JWT (so other credential types can be tried).
+    The role is taken from the database so role changes apply immediately.
+
+    Raises:
+        HTTPException: 401 if the token is a valid access JWT but its user is missing, inactive or malformed.
+    """
     try:
         payload = decode_token(config, token)
-        if payload.get("type") != "access":
-            return None
-        return CurrentIdentity(
-            user_id=payload["sub"],
-            role=UserRole(payload["role"]),
-            identity_type="user",
-        )
     except pyjwt.PyJWTError:
         return None
+    if payload.get("type") != "access":
+        return None
+
+    try:
+        user = await db.get(User, uuid.UUID(str(payload.get("sub"))))
+    except ValueError:
+        user = None
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    return CurrentIdentity(
+        user_id=str(user.id),
+        role=user.role,
+        identity_type="user",
+        username=user.username,
+    )
 
 
 async def _try_api_key(config: AuthConfig, key_value: str, db: AsyncSession) -> CurrentIdentity | None:
@@ -142,7 +158,7 @@ async def get_current_identity(
 
     if token:
         # 1. Try JWT Bearer token
-        identity = await _try_jwt(config, token)
+        identity = await _try_jwt(config, token, db)
         if identity:
             return identity
 
