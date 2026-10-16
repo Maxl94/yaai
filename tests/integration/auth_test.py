@@ -7,8 +7,10 @@ login, token refresh, logout, user CRUD, service accounts, and model access.
 import uuid
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from yaai.server.auth.config import AuthConfig, GoogleOAuthConfig, JWTConfig, LocalAuthConfig, OAuthConfig
@@ -26,7 +28,8 @@ from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models import inference as _inference_models  # noqa: F401
 from yaai.server.models import job as _job_models  # noqa: F401
 from yaai.server.models import model as _model_models  # noqa: F401
-from yaai.server.models.auth import AuthProvider, User, UserRole
+from yaai.server.models.auth import AuthProvider, RefreshToken, User, UserRole
+from yaai.server.services.auth_service import AuthService
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -821,3 +824,114 @@ async def test_grant_access_to_unknown_service_account_returns_404(owner_client:
 async def test_list_access_for_unknown_model_returns_404(owner_client: AsyncClient):
     resp = await owner_client.get(f"/api/v1/auth/models/{uuid.uuid4()}/access")
     assert resp.status_code == 404
+
+
+async def test_deleted_user_jwt_with_valid_api_key_header_rejected(
+    owner_client: AsyncClient, auth_client: AsyncClient, seeded_viewer: User
+):
+    sa_resp = await owner_client.post(
+        "/api/v1/auth/service-accounts", json={"name": "fallthrough-sa", "auth_type": "api_key"}
+    )
+    raw_key = sa_resp.json()["data"]["raw_key"]
+    headers = {**_bearer(seeded_viewer), "X-API-Key": raw_key}
+
+    assert (await auth_client.get("/api/v1/auth/me", headers=headers)).status_code == 200
+    assert (await owner_client.delete(f"/api/v1/auth/users/{seeded_viewer.id}")).status_code == 204
+
+    assert (await auth_client.get("/api/v1/auth/me", headers=headers)).status_code == 401
+    # The API key on its own is still valid
+    assert (await auth_client.get("/api/v1/models", headers={"X-API-Key": raw_key})).status_code == 200
+
+
+# Self-protection and last-owner guards
+
+
+async def test_owner_cannot_deactivate_self(owner_client: AsyncClient, seeded_owner: User):
+    resp = await owner_client.put(f"/api/v1/auth/users/{seeded_owner.id}", json={"is_active": False})
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Cannot deactivate your own account"
+
+
+async def test_owner_cannot_downgrade_self(owner_client: AsyncClient, seeded_owner: User):
+    resp = await owner_client.put(f"/api/v1/auth/users/{seeded_owner.id}", json={"role": "viewer"})
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Cannot change your own role"
+
+
+async def test_owner_can_update_own_email_and_keep_role(owner_client: AsyncClient, seeded_owner: User):
+    resp = await owner_client.put(
+        f"/api/v1/auth/users/{seeded_owner.id}",
+        json={"email": "new-admin@example.com", "role": "owner", "is_active": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["email"] == "new-admin@example.com"
+
+
+@pytest.mark.parametrize("changes", [{"is_active": False}, {"role": UserRole.VIEWER}])
+async def test_last_active_owner_cannot_be_deactivated_or_downgraded(
+    db_session: AsyncSession, seeded_owner: User, changes: dict
+):
+    svc = AuthService(db_session, AUTH_CONFIG)
+    with pytest.raises(HTTPException) as exc:
+        await svc.update_user(seeded_owner.id, **changes)
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "At least one active owner is required"
+
+
+async def test_last_active_owner_cannot_be_deleted(db_session: AsyncSession, seeded_owner: User):
+    svc = AuthService(db_session, AUTH_CONFIG)
+    with pytest.raises(HTTPException) as exc:
+        await svc.delete_user(seeded_owner.id)
+    assert exc.value.status_code == 409
+
+
+async def test_owner_can_be_demoted_when_another_active_owner_exists(
+    db_session: AsyncSession, seeded_owner: User, seeded_viewer: User
+):
+    svc = AuthService(db_session, AUTH_CONFIG)
+    await svc.update_user(seeded_viewer.id, role=UserRole.OWNER)
+
+    assert (await svc.update_user(seeded_owner.id, role=UserRole.VIEWER)).role == UserRole.VIEWER
+    # seeded_viewer is now the last active owner
+    with pytest.raises(HTTPException) as exc:
+        await svc.delete_user(seeded_viewer.id)
+    assert exc.value.status_code == 409
+
+
+async def test_inactive_owners_do_not_count_as_active_owners(db_session: AsyncSession, seeded_owner: User):
+    inactive_owner = User(
+        username="inactive-owner",
+        hashed_password=hash_password("inactive-owner-pass"),
+        role=UserRole.OWNER,
+        auth_provider=AuthProvider.LOCAL,
+        is_active=False,
+    )
+    db_session.add(inactive_owner)
+    await db_session.commit()
+
+    svc = AuthService(db_session, AUTH_CONFIG)
+    with pytest.raises(HTTPException) as exc:
+        await svc.update_user(seeded_owner.id, is_active=False)
+    assert exc.value.status_code == 409
+    # Removing an already inactive owner is always fine
+    assert await svc.delete_user(inactive_owner.id) is True
+
+
+async def test_change_password_revokes_refresh_tokens_in_one_commit(db_session: AsyncSession, seeded_owner: User):
+    svc = AuthService(db_session, AUTH_CONFIG)
+    await svc.create_tokens(seeded_owner)
+
+    commits = 0
+    original_commit = db_session.commit
+
+    async def counting_commit():
+        nonlocal commits
+        commits += 1
+        await original_commit()
+
+    db_session.commit = counting_commit
+    await svc.change_password(seeded_owner, "brand-new-password")
+
+    assert commits == 1
+    remaining = await db_session.execute(select(RefreshToken).where(RefreshToken.user_id == seeded_owner.id))
+    assert remaining.scalars().all() == []

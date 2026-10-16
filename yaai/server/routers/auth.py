@@ -21,7 +21,7 @@ from yaai.server.auth.oauth import get_oauth
 from yaai.server.auth.passwords import verify_password
 from yaai.server.config import settings
 from yaai.server.database import get_db
-from yaai.server.models.auth import ModelAccess, ServiceAccount
+from yaai.server.models.auth import ModelAccess, ServiceAccount, UserRole
 from yaai.server.models.model import Model
 from yaai.server.rate_limit import limiter
 from yaai.server.schemas.auth import (
@@ -279,9 +279,8 @@ async def change_my_password(
     if not verify_password(data.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
+    # Also revokes all refresh tokens: every session must re-authenticate once its access token expires
     await svc.change_password(user, data.new_password)
-    # All sessions (including this one) must re-authenticate once their access token expires
-    await svc.revoke_all_user_tokens(user.id)
     return {"data": {"message": "Password changed successfully. Please log in again."}}
 
 
@@ -332,10 +331,15 @@ async def create_user(
 async def update_user(
     user_id: uuid.UUID,
     data: UserUpdate,
-    _identity: CurrentIdentity = Depends(require_owner),
+    identity: CurrentIdentity = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a user (owner only)."""
+    """Update a user (owner only). Owners cannot deactivate or downgrade themselves."""
+    if str(user_id) == identity.user_id:
+        if data.is_active is False:
+            raise HTTPException(status_code=403, detail="Cannot deactivate your own account")
+        if data.role is not None and data.role != UserRole.OWNER:
+            raise HTTPException(status_code=403, detail="Cannot change your own role")
     config = get_auth_config()
     svc = _get_service(db, config)
     user = await svc.update_user(user_id, **data.model_dump(exclude_unset=True))

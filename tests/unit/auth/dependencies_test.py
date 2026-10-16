@@ -17,6 +17,7 @@ from yaai.server.auth.dependencies import (
     check_model_write_access,
     get_accessible_model_ids,
     get_auth_config,
+    get_current_identity,
     require_auth,
     require_owner,
     resolve_model_id_from_job,
@@ -136,6 +137,25 @@ class TestTryJwt:
 
     async def test_invalid_token_returns_none(self, auth_config):
         assert await _try_jwt(auth_config, "garbage-token", _db_returning(None)) is None
+
+
+class TestGetCurrentIdentityNoFallthrough:
+    async def test_jwt_of_deleted_user_is_not_rescued_by_api_key(self, auth_config):
+        token = create_access_token(auth_config, subject=str(uuid.uuid4()), role="owner")
+        credentials = MagicMock(credentials=token)
+        sa_identity = CurrentIdentity(user_id=None, role=UserRole.VIEWER, identity_type="service_account_api_key")
+        with (
+            patch("yaai.server.auth.dependencies._try_api_key", new_callable=AsyncMock) as mock_api_key,
+            patch("yaai.server.auth.dependencies._try_google_sa", new_callable=AsyncMock) as mock_google_sa,
+            patch("yaai.server.auth.dependencies._try_google_user", new_callable=AsyncMock) as mock_google_user,
+        ):
+            mock_api_key.return_value = sa_identity
+            with pytest.raises(HTTPException) as exc:
+                await get_current_identity(credentials, "valid-sa-key", _db_returning(None))
+        assert exc.value.status_code == 401
+        mock_api_key.assert_not_awaited()
+        mock_google_sa.assert_not_awaited()
+        mock_google_user.assert_not_awaited()
 
 
 class TestTryApiKey:
