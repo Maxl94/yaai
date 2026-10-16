@@ -14,7 +14,10 @@ What it does:
   4. Configures the version's drift job (daily, vs. reference) and triggers one run.
 
 Authentication:
-  Pass --api-key or set YAAI_API_KEY. Without a key the SDK falls back to Google ADC (requires yaai[gcp]).
+  Pass --api-key or set YAAI_API_KEY. With auth enabled the key must belong to a service account (or an owner),
+  because creating a model needs that role; models created by a service account are accessible to it. With
+  AUTH_ENABLED=false any value works. Without a key the SDK falls back to Google ADC (requires yaai[gcp]) and
+  sends your Google ID token to the target server.
 
 Usage:
     YAAI_API_KEY=yaam_... python scripts/llm_monitoring_example.py
@@ -27,8 +30,11 @@ import argparse
 import asyncio
 import os
 import random
+import sys
 import uuid
 from datetime import UTC, datetime, timedelta
+
+import httpx
 
 from yaai import YaaiClient
 from yaai.schemas.model import DataType, FieldDirection, ModelRead, SchemaFieldCreate
@@ -37,6 +43,8 @@ DEFAULT_BASE_URL = "http://localhost:8000/api/v1"
 DEFAULT_MODEL_NAME = "llm-app-metadata"
 DEFAULT_VERSION = "v1"
 BATCH_SIZE = 1000
+# Matches the server default of REFERENCE_DATA_MAX_RECORDS; the baseline is uploaded in a single request.
+MAX_RECORDS = 50_000
 
 # Illustrative USD prices per 1M tokens as (input, output). Not real prices -- maintain your own table.
 PRICE_PER_1M_TOKENS: dict[str, tuple[float, float]] = {
@@ -76,8 +84,9 @@ def _categorical(direction: FieldDirection, name: str, threshold: float = 0.1) -
     )
 
 
-# PSI > 0.2 is the usual "significant shift" level. For categoricals, js_divergence (a 0..1 distance) is more
-# robust than chi-squared for rare classes such as errors, which therefore get a lower threshold.
+# PSI > 0.2 is the usual "significant shift" level. For categoricals, js_divergence is a size-of-shift distance
+# (0..1). A rise of a rare class such as errors from 2% to 5% scores only ~0.07, below the default 0.1, so the
+# error field gets a lower threshold.
 LLM_SCHEMA_FIELDS: list[SchemaFieldCreate] = [
     _numerical(FieldDirection.INPUT, "prompt_tokens"),
     _numerical(FieldDirection.INPUT, "prompt_length_chars"),
@@ -202,21 +211,50 @@ def generate_call_metadata(
     return records
 
 
+class ExampleError(Exception):
+    """An expected failure with an actionable message for the user."""
+
+
 async def get_or_create_model(client: YaaiClient, name: str) -> ModelRead:
-    """Return the model with the given name, creating it if it does not exist yet."""
+    """Return the model with the given name, creating it if it does not exist yet.
+
+    ``YaaiClient.list_models()`` returns only the models the caller can access, and only the first page. A model
+    that exists but is not listed (more than one page of newer models, or owned by another identity) makes
+    ``create_model`` fail with 409.
+
+    Raises:
+        ExampleError: If the name is taken by a model that is not visible to the caller.
+    """
     for model in await client.list_models():
         if model.name == name:
             return model
-    return await client.create_model(name, "LLM application metadata monitoring (no prompt or completion content).")
+    try:
+        return await client.create_model(name, "LLM application metadata monitoring (no prompt or completion content).")
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 409:
+            raise
+        raise ExampleError(
+            f"A model named '{name}' already exists but is not visible to this API key. "
+            "Use --model-name with a different name, or grant the key's service account access to the model."
+        ) from exc
 
 
-async def send_in_batches(client: YaaiClient, version_id: uuid.UUID, records: list[dict]) -> int:
-    """Send inference records in batches and return the number of ingested records."""
-    ingested = 0
+async def send_in_batches(client: YaaiClient, version_id: uuid.UUID, records: list[dict]) -> tuple[int, int]:
+    """Send inference records in batches.
+
+    YAAI answers with success even if it rejects individual records, so failures are counted and printed.
+
+    Returns:
+        Tuple of (ingested, failed) record counts.
+    """
+    ingested = failed = 0
     for start in range(0, len(records), BATCH_SIZE):
         result = await client.add_inferences(version_id, records[start : start + BATCH_SIZE])
         ingested += result.ingested
-    return ingested
+        failed += result.failed
+        if result.failed:
+            print(f"  {result.failed} records rejected, first errors: {result.errors[:3]}")
+    return ingested, failed
 
 
 async def configure_job(client: YaaiClient, model_id: uuid.UUID, version_id: uuid.UUID) -> dict | None:
@@ -244,8 +282,8 @@ async def run(args: argparse.Namespace) -> None:
         print(f"Uploaded {ref_result.ingested} reference records (baseline)")
 
         current = generate_call_metadata(args.records, drifted=True, rng=rng, window_end=now)
-        ingested = await send_in_batches(client, version.id, current)
-        print(f"Sent {ingested} inference records (shifted period)")
+        ingested, failed = await send_in_batches(client, version.id, current)
+        print(f"Sent {ingested} inference records (shifted period), {failed} rejected")
 
         job = await configure_job(client, model.id, version.id)
         if job is None:
@@ -253,6 +291,8 @@ async def run(args: argparse.Namespace) -> None:
             return
         run_info = await client.trigger_job(job["id"])
         print(f"Triggered drift job '{job['name']}': status={run_info['status']}")
+        if run_info["status"] != "completed":
+            print(f"Drift run did not complete: {run_info.get('error_message') or 'no error message returned'}")
         print(f"Open the drift results of version {version.id} in the YAAI UI to inspect the shifted fields.")
 
 
@@ -263,25 +303,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--api-key",
         default=os.environ.get("YAAI_API_KEY"),
-        help="API key (default: env YAAI_API_KEY; without a key Google ADC is used)",
+        help="Service account API key (default: env YAAI_API_KEY; any value if auth is disabled; "
+        "without a key Google ADC is used)",
     )
-    parser.add_argument("--records", type=_positive_int, default=1000, help="Records per period (default: 1000)")
+    parser.add_argument(
+        "--records",
+        type=_records_count,
+        default=1000,
+        help=f"Records per period, 1..{MAX_RECORDS} (default: 1000)",
+    )
     parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME, help=f"Model name (default: {DEFAULT_MODEL_NAME})")
     parser.add_argument("--version", default=DEFAULT_VERSION, help=f"Version label (default: {DEFAULT_VERSION})")
     parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     return parser.parse_args(argv)
 
 
-def _positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed < 1:
-        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value}")
+def _records_count(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from None
+    if not 1 <= parsed <= MAX_RECORDS:
+        raise argparse.ArgumentTypeError(f"expected a value between 1 and {MAX_RECORDS}, got {value}")
     return parsed
 
 
 def main() -> None:
     """Main entry point for the script."""
-    asyncio.run(run(parse_args()))
+    try:
+        asyncio.run(run(parse_args()))
+    except ExampleError as exc:
+        sys.exit(f"error: {exc}")
 
 
 if __name__ == "__main__":

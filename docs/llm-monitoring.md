@@ -54,7 +54,9 @@ Metric names are the ones accepted by `drift_metric` (`psi`, `ks_test`, `chi_squ
 |---|---|---|---|
 | Numerical (tokens, lengths, latency, cost, tool count) | `psi` | `0.2` (default) | 0.1--0.2 is "worth watching", above 0.2 is a significant shift |
 | Categorical (`llm_model`, `route`, `finish_reason`) | `js_divergence` | `0.1` (default) | Score is the Jensen-Shannon distance (0--1) |
-| Categorical, rare class (`error`) | `js_divergence` | `0.05` | A rise from 2 % to 10 % errors moves the score only a little, so use a lower threshold |
+| Categorical, rare class (`error`) | `js_divergence` | `0.05` | A rise in the error rate from 2 % to 5 % scores only 0.070, below the default 0.1, so use a lower threshold for rare classes |
+
+For reference, the Jensen-Shannon distance (base 2, as computed in `yaai/server/drift/js_divergence.py`) of the error rate against a 2 % baseline is 0.070 at 5 % errors (flagged with 0.05, not with 0.1), 0.149 at 10 % and 0.175 at 12 % (flagged with both).
 
 Why not `ks_test` / `chi_squared` everywhere? Both report `1 - p_value` with a default threshold of `0.95`, so with thousands of calls per window they flag even tiny, harmless shifts. PSI and JS divergence measure the *size* of a shift, which is what you want to alert on. Use `chi_squared` / `ks_test` if you explicitly want a significance test.
 
@@ -111,125 +113,45 @@ Use `trigger_job` to run it on demand and `backfill_job` to compute historical r
 Providers report token counts, not prices. Keep a small, user-maintained price table and multiply:
 
 ```python
-# USD per 1M tokens: (input, output) -- fill in your provider's current prices
-PRICE_PER_1M_TOKENS = {
-    "gemini-2.5-flash": (0.30, 2.50),
-}
+--8<-- "scripts/llm_reporter_example.py:imports"
 
-def estimate_cost_usd(llm_model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    price_in, price_out = PRICE_PER_1M_TOKENS[llm_model]
-    return (prompt_tokens * price_in + completion_tokens * price_out) / 1_000_000
+--8<-- "scripts/llm_reporter_example.py:cost"
 ```
 
-The prices in the example script are illustrative. When your provider changes prices, `cost_usd` will shift and drift detection will report it -- which is usually what you want to know, but keep it in mind when interpreting alerts.
+A model without a price entry gets `cost_usd = null` (accepted by the schema) and one warning in the log instead of an exception. The prices in the scripts are illustrative. When your provider changes prices, `cost_usd` will shift and drift detection will report it -- which is usually what you want to know, but keep it in mind when interpreting alerts.
 
 ## Wrapping an LLM call without slowing the app
 
-Timing a call is cheap. Sending it must not sit on the request path: collect records in memory and flush them in batches with `add_inferences` (up to 10,000 records per call). The sketch below drops records when the queue is full and never raises into the application, so monitoring cannot break or slow your LLM calls.
+Timing a call is cheap. Sending it must not sit on the request path: collect records in memory and flush them in batches with `add_inferences` (up to 10,000 records per call). The reporter below is the tested code from [`scripts/llm_reporter_example.py`](https://github.com/Maxl94/yaai/blob/main/scripts/llm_reporter_example.py) -- copy it into the same module as the cost helper above. It guarantees:
+
+- **Telemetry never breaks the app.** Errors while sending, an unknown model in the price table or missing token counts are logged as warnings. An exception from your LLM call is re-raised unchanged.
+- **Bounded memory.** When the queue is full (`max_queue`) new records are dropped and counted in a warning. Throughput is bounded by `max_queue` per `flush_seconds`, and a full batch wakes the worker early.
+- **No silent data loss.** YAAI answers `201` even when it rejects records (e.g. a missing schema field); the reporter logs the `failed` count with the first server-side errors.
+- **Bounded shutdown.** `stop()` flushes what is left and waits at most `stop_timeout` seconds (default 10), then gives up with a warning. Create the `YaaiClient` with a short `timeout` so an unreachable server cannot block the worker.
 
 ```python
-import asyncio
-import logging
-import time
-from contextlib import contextmanager
-
-from yaai import YaaiClient
-
-logger = logging.getLogger(__name__)
-
-
-class MetadataReporter:
-    """Fire-and-forget batching of LLM call metadata."""
-
-    def __init__(self, client: YaaiClient, version_id, *, batch_size=100, flush_seconds=10.0, max_queue=10_000):
-        self._client = client
-        self._version_id = version_id
-        self._batch_size = batch_size
-        self._flush_seconds = flush_seconds
-        self._queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=max_queue)
-        self._task: asyncio.Task | None = None
-
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run())
-
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-        await self._flush()
-
-    def record(self, record: dict) -> None:
-        try:
-            self._queue.put_nowait(record)
-        except asyncio.QueueFull:
-            logger.warning("Metadata queue full, dropping record")
-
-    async def _run(self) -> None:
-        while True:
-            await asyncio.sleep(self._flush_seconds)
-            await self._flush()
-
-    async def _flush(self) -> None:
-        while not self._queue.empty():
-            batch = [self._queue.get_nowait() for _ in range(min(self._batch_size, self._queue.qsize()))]
-            try:
-                await self._client.add_inferences(self._version_id, batch)
-            except Exception:
-                logger.warning("Failed to send %d metadata records, dropping them", len(batch), exc_info=True)
-
-
-@contextmanager
-def tracked_call(reporter: MetadataReporter, *, llm_model: str, route: str, prompt: str, tool_count: int = 0):
-    """Time an LLM call and report its metadata. Only the prompt *length* is kept, never the text."""
-    call = {"prompt_tokens": 0, "completion_tokens": 0, "finish_reason": "unknown"}
-    error = False
-    start = time.perf_counter()
-    try:
-        yield call  # fill in call[...] from the provider's usage metadata
-    except Exception:
-        error = True
-        call["finish_reason"] = "error"
-        raise
-    finally:
-        reporter.record(
-            {
-                "inputs": {
-                    "prompt_tokens": call["prompt_tokens"],
-                    "prompt_length_chars": len(prompt),
-                    "llm_model": llm_model,
-                    "route": route,
-                    "tool_count": tool_count,
-                },
-                "outputs": {
-                    "completion_tokens": call["completion_tokens"],
-                    "total_tokens": call["prompt_tokens"] + call["completion_tokens"],
-                    "latency_ms": round((time.perf_counter() - start) * 1000, 1),
-                    "cost_usd": estimate_cost_usd(llm_model, call["prompt_tokens"], call["completion_tokens"]),
-                    "error": "true" if error else "false",
-                    "finish_reason": call["finish_reason"],
-                },
-            }
-        )
+--8<-- "scripts/llm_reporter_example.py:reporter"
 ```
 
 Usage:
 
 ```python
-async with YaaiClient(base_url, api_key=api_key) as client:
+async with YaaiClient(base_url, api_key=api_key, timeout=5.0) as client:
     reporter = MetadataReporter(client, version.id)
     reporter.start()
-
-    with tracked_call(reporter, llm_model="gemini-2.5-flash", route="chat", prompt=prompt) as call:
-        response = await llm.generate(prompt)
-        call["prompt_tokens"] = response.usage.prompt_tokens
-        call["completion_tokens"] = response.usage.completion_tokens
-        call["finish_reason"] = response.finish_reason
-
-    await reporter.stop()  # on shutdown: flush what is left
+    try:
+        with tracked_call(reporter, llm_model="gemini-2.5-flash", route="chat", prompt=prompt) as call:
+            response = await llm.generate(prompt)
+            call["prompt_tokens"] = response.usage.prompt_tokens
+            call["completion_tokens"] = response.usage.completion_tokens
+            call["finish_reason"] = response.finish_reason
+    finally:
+        await reporter.stop()  # on shutdown: flush what is left
 ```
 
 Notes:
 
-- Failed calls usually have no token usage; they are reported with `0` tokens. If errors are frequent, this pulls the token distributions down -- that is a correct reflection of what was sent, but keep it in mind when reading the numbers.
+- Failed calls usually have no token usage; missing counts are reported as `0` tokens, and cancelled calls count as errors. If errors are frequent, this pulls the token distributions down -- that is a correct reflection of what was sent, but keep it in mind when reading the numbers.
 - Records carry the current time by default. Pass `"timestamp"` (ISO 8601) in a record if you send them later than they happened.
 - For multi-process deployments, each process runs its own reporter; batches are independent.
 
@@ -242,7 +164,9 @@ export YAAI_API_KEY=yaam_...
 python scripts/llm_monitoring_example.py --base-url http://localhost:8000/api/v1 --records 1000
 ```
 
-It never sends text. Re-running it replaces the reference data and appends more inferences to the same version.
+It never sends text. Re-running it replaces the reference data and appends more inferences to the same version. `--records` is limited to 1--50,000 because the baseline is uploaded in one request (server default `REFERENCE_DATA_MAX_RECORDS`). The script prints rejected record counts and, if the drift run fails, the error message.
+
+**API key:** with authentication enabled, use an API key of a **service account** (or an owner), because creating a model requires one of those roles; models created by a service account are accessible to it (see [Server setup](server-setup.md#6-authentication)). With `AUTH_ENABLED=false` any value works. Without a key the SDK falls back to Google Application Default Credentials. If the model name already exists but is not visible to the key, the script stops with an actionable message -- pick another `--model-name` or grant the service account access.
 
 ## Mapping from OpenTelemetry GenAI semantic conventions
 

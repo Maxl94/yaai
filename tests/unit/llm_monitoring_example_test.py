@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
 from yaai.schemas.inference import InferenceBatchCreate
@@ -175,7 +176,7 @@ def _mock_client(existing_models: list | None = None) -> MagicMock:
     client.create_model = AsyncMock(return_value=model)
     client.get_or_create_version = AsyncMock(return_value=version)
     client.add_reference_data = AsyncMock(return_value=MagicMock(ingested=25))
-    client.add_inferences = AsyncMock(return_value=MagicMock(ingested=25))
+    client.add_inferences = AsyncMock(return_value=MagicMock(ingested=25, failed=0, errors=[]))
     client.get_version_job = AsyncMock(return_value={"id": str(uuid.uuid4()), "name": "job"})
     client.update_job = AsyncMock(return_value={"id": "j", "name": "job"})
     client.trigger_job = AsyncMock(return_value={"status": "completed"})
@@ -204,13 +205,59 @@ class TestOrchestration:
 
     async def test_send_in_batches_splits_records(self):
         client = _mock_client()
-        client.add_inferences = AsyncMock(side_effect=lambda _id, recs: MagicMock(ingested=len(recs)))
+        client.add_inferences = AsyncMock(
+            side_effect=lambda _id, recs: MagicMock(ingested=len(recs), failed=0, errors=[])
+        )
         records = [{"inputs": {}, "outputs": {}}] * (example.BATCH_SIZE + 5)
 
-        ingested = await example.send_in_batches(client, uuid.uuid4(), records)
+        ingested, failed = await example.send_in_batches(client, uuid.uuid4(), records)
 
-        assert ingested == len(records)
+        assert (ingested, failed) == (len(records), 0)
         assert client.add_inferences.await_count == 2
+
+    async def test_send_in_batches_reports_rejected_records(self, capsys):
+        client = _mock_client()
+        client.add_inferences = AsyncMock(
+            return_value=MagicMock(ingested=0, failed=2, errors=["Record 0: missing field 'latency_ms'"])
+        )
+
+        ingested, failed = await example.send_in_batches(client, uuid.uuid4(), [{"inputs": {}, "outputs": {}}] * 2)
+
+        assert (ingested, failed) == (0, 2)
+        out = capsys.readouterr().out
+        assert "2 records rejected" in out
+        assert "missing field 'latency_ms'" in out
+
+    async def test_get_or_create_model_conflict_gives_actionable_error(self):
+        client = _mock_client()
+        response = httpx.Response(409, request=httpx.Request("POST", "http://x/models"))
+        client.create_model = AsyncMock(
+            side_effect=httpx.HTTPStatusError("409", request=response.request, response=response)
+        )
+
+        with pytest.raises(example.ExampleError, match="--model-name"):
+            await example.get_or_create_model(client, "taken")
+
+    async def test_get_or_create_model_reraises_other_http_errors(self):
+        client = _mock_client()
+        response = httpx.Response(500, request=httpx.Request("POST", "http://x/models"))
+        client.create_model = AsyncMock(
+            side_effect=httpx.HTTPStatusError("500", request=response.request, response=response)
+        )
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await example.get_or_create_model(client, "name")
+
+    async def test_run_prints_error_message_of_failed_drift_run(self, monkeypatch, capsys):
+        client = _mock_client()
+        client.trigger_job = AsyncMock(
+            return_value={"status": "failed", "error_message": "No reference data available"}
+        )
+        monkeypatch.setattr(example, "YaaiClient", lambda *a, **k: client)
+
+        await example.run(example.parse_args(["--records", "5", "--api-key", "k"]))
+
+        assert "No reference data available" in capsys.readouterr().out
 
     async def test_configure_job_without_job_returns_none(self):
         client = _mock_client()
@@ -256,7 +303,10 @@ class TestParseArgs:
         monkeypatch.setenv("YAAI_API_KEY", "from-env")
         assert example.parse_args(["--api-key", "cli"]).api_key == "cli"
 
-    @pytest.mark.parametrize("value", ["0", "-5"])
-    def test_records_must_be_positive(self, value):
+    @pytest.mark.parametrize("value", ["0", "-5", "50001", "abc"])
+    def test_records_must_be_within_bounds(self, value):
         with pytest.raises(SystemExit):
             example.parse_args(["--records", value])
+
+    def test_records_upper_bound_is_accepted(self):
+        assert example.parse_args(["--records", str(example.MAX_RECORDS)]).records == example.MAX_RECORDS
