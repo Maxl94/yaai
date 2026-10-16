@@ -104,7 +104,7 @@ from yaai.schemas.model import SchemaFieldCreate
 async def main():
     async with YaaiClient("http://localhost:8000/api/v1", api_key="yaam_...") as client:
 
-        # Register a model
+        # Register a model (in the "default" project; pass project_id=... to choose another one)
         model = await client.create_model("fraud-detector")
 
         # Create a version with schema
@@ -151,9 +151,10 @@ asyncio.run(main())
 
 | Method | What it does |
 |---|---|
-| `create_model(name)` | Register a new model |
+| `create_model(name, description=None, project_id=None)` | Register a new model in a project (the `default` project if omitted) |
 | `get_model(model_id)` | Fetch model details |
-| `list_models()` | List all models |
+| `list_models(project_id=None)` | List the models you can access, optionally of one project |
+| `list_projects()` | List the projects you can access, including your role (`my_role`) and model count |
 | `delete_model(model_id)` | Delete a model and all its data |
 | `create_model_version(model_id, version, schema_fields)` | Create a versioned schema |
 | `get_version(model_id, version_id)` | Fetch full version details |

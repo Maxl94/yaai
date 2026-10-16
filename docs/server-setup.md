@@ -102,6 +102,11 @@ Open **http://localhost:8000** -- you should see the login screen.
 
 API docs are available at **http://localhost:8000/docs** (Swagger UI).
 
+> [!NOTE]
+> Upgrading from a version without projects: the migration creates a `default` project that contains all existing models and
+> makes every existing user a **viewer** of it, so everybody keeps reading all models (global owners keep full access).
+> Service accounts keep their per-model access. Downgrading fails if two projects contain models with the same name.
+
 ## 5. Start the frontend (development only)
 
 For local development with frontend hot-reload, start the Vue dev server in a separate terminal:
@@ -118,6 +123,10 @@ The frontend runs on **http://localhost:3000** and proxies `/api` requests to th
 ## 6. Authentication
 
 Out of the box, the server uses **local authentication** (username + password) with **API key auth** enabled for service accounts.
+
+### Projects and access
+
+Models live in projects (see [Core Concepts](concepts.md#projects)). Global owners create projects and add members (`POST /api/v1/projects`, `POST /api/v1/projects/{id}/members`); project owners manage the members of their own projects. Newly created users -- also those auto-created on their first Google login -- are **not** members of any project and see no models until they are added to one.
 
 ### Default admin account
 
