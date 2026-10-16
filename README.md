@@ -120,8 +120,11 @@ docker compose up db -d
 uv sync
 cd frontend && npm ci && cd ..
 
-# Start backend (hot-reload)
+# Apply database migrations (required on first run and after every upgrade)
 cp .env.example .env
+uv run python -m yaai.server.migrate
+
+# Start backend (hot-reload)
 uv run uvicorn yaai.server.main:app --reload --reload-dir yaai --host 0.0.0.0 --port 8000
 
 # Start frontend (separate terminal, hot-reload)

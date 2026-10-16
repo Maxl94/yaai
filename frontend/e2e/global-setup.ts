@@ -1,7 +1,8 @@
 /**
  * Global setup for auth-separation E2E tests.
  *
- * Starts the docker-compose test stack and runs the seed script.
+ * Starts the docker-compose test stack (its one-shot `migrate` service applies
+ * database migrations before the backend starts) and runs the seed script.
  * Run from project root: npx playwright test --config playwright.e2e.config.ts
  */
 import { execSync } from 'child_process'

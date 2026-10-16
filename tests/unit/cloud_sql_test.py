@@ -189,30 +189,29 @@ class TestInitEngine:
             assert database.engine is mock_engine_2
 
 
-class TestApplyMigrations:
-    """Test _apply_migrations via the already-imported main module."""
+class TestRunMigrations:
+    """Test migrate.run_migrations for both connection paths."""
 
-    def test_apply_migrations_without_cloud_sql(self):
-        import yaai.server.main as main_mod
+    def test_run_migrations_without_cloud_sql(self):
+        import yaai.server.migrate as migrate_mod
 
         with (
-            patch.object(main_mod, "AlembicConfig") as mock_cfg_cls,
-            patch.object(main_mod, "command") as mock_command,
-            patch.object(main_mod, "settings") as mock_s,
+            patch.object(migrate_mod, "AlembicConfig") as mock_cfg_cls,
+            patch.object(migrate_mod, "command") as mock_command,
+            patch.object(migrate_mod, "settings") as mock_s,
         ):
             mock_s.cloud_sql_instance = None
             mock_s.database_url_sync = "sqlite:///test.db"
             mock_cfg = MagicMock()
             mock_cfg_cls.return_value = mock_cfg
 
-            main_mod._apply_migrations()
+            migrate_mod.run_migrations()
 
-            mock_cfg.set_main_option.assert_called_once()
+            mock_cfg.set_main_option.assert_called_once_with("sqlalchemy.url", "sqlite:///test.db")
             mock_command.upgrade.assert_called_once_with(mock_cfg, "head")
 
-    def test_apply_migrations_with_cloud_sql(self):
-        import yaai.server.main as main_mod
-        from yaai.server.cloud_sql import CloudSQLConnector
+    def test_run_migrations_with_cloud_sql(self):
+        import yaai.server.migrate as migrate_mod
 
         mock_connection = MagicMock()
         mock_engine = MagicMock()
@@ -220,9 +219,9 @@ class TestApplyMigrations:
         mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
 
         with (
-            patch.object(main_mod, "AlembicConfig") as mock_cfg_cls,
-            patch.object(main_mod, "command") as mock_command,
-            patch.object(main_mod, "settings") as mock_s,
+            patch.object(migrate_mod, "AlembicConfig") as mock_cfg_cls,
+            patch.object(migrate_mod, "command") as mock_command,
+            patch.object(migrate_mod, "settings") as mock_s,
             patch.object(CloudSQLConnector, "create_sync_engine", return_value=mock_engine),
         ):
             mock_s.cloud_sql_instance = "my-project:us-central1:my-instance"
@@ -230,8 +229,18 @@ class TestApplyMigrations:
             mock_cfg.attributes = {}
             mock_cfg_cls.return_value = mock_cfg
 
-            main_mod._apply_migrations()
+            migrate_mod.run_migrations()
 
             assert mock_cfg.attributes["connection"] is mock_connection
             mock_command.upgrade.assert_called_once_with(mock_cfg, "head")
             mock_cfg.set_main_option.assert_not_called()
+            mock_engine.dispose.assert_called_once()
+
+    def test_main_exits_nonzero_on_failure(self):
+        import yaai.server.migrate as migrate_mod
+
+        with patch.object(migrate_mod, "run_migrations", side_effect=RuntimeError("boom")):
+            with pytest.raises(SystemExit) as exc_info:
+                migrate_mod.main()
+
+        assert exc_info.value.code == 1

@@ -1,3 +1,13 @@
+x-yaai-app: &yaai-app
+  image: yaai-dev:local
+  build:
+    context: .
+    dockerfile: Dockerfile.dev
+  env_file:
+    - .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aimon}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-aimonitoring}
+
 services:
   db:
     image: postgres:16-alpine
@@ -15,19 +25,24 @@ services:
       timeout: 3s
       retries: 5
 
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.dev
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aimon}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-aimonitoring}
+  # One-shot job: applies database migrations before the backend starts
+  migrate:
+    <<: *yaai-app
+    command: [".venv/bin/python", "-m", "yaai.server.migrate"]
+    restart: "no"
     depends_on:
       db:
         condition: service_healthy
+
+  backend:
+    <<: *yaai-app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:

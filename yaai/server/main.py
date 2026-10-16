@@ -1,3 +1,4 @@
+import asyncio
 import importlib.metadata
 import logging
 import os
@@ -5,8 +6,6 @@ import secrets as _secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from alembic import command
-from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -22,6 +21,7 @@ from yaai.server.auth.dependencies import set_auth_config
 from yaai.server.auth.oauth import setup_oauth
 from yaai.server.auth.passwords import hash_password
 from yaai.server.config import settings
+from yaai.server.migrate import SchemaNotUpToDateError, check_schema_up_to_date
 from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, User, UserRole
 from yaai.server.rate_limit import limiter
@@ -35,33 +35,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-_SERVER_DIR = Path(__file__).resolve().parent
-
-
-def _apply_migrations() -> None:
-    """Run Alembic migrations up to head.
-
-    Called on startup to ensure the database schema is always up to date.
-    Disable by setting AUTO_MIGRATE=false.
-
-    For Cloud SQL, uses a standalone sync Connector (via create_sync_engine)
-    so it never interferes with the async Connector's event loop.
-    """
-    alembic_cfg = AlembicConfig(str(_SERVER_DIR / "alembic.ini"))
-    try:
-        if settings.cloud_sql_instance:
-            from yaai.server.cloud_sql import CloudSQLConnector  # noqa: PLC0415
-
-            engine = CloudSQLConnector.create_sync_engine()
-            with engine.begin() as connection:
-                alembic_cfg.attributes["connection"] = connection
-                command.upgrade(alembic_cfg, "head")
-        else:
-            alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url_sync)
-            command.upgrade(alembic_cfg, "head")
-    except BaseException:
-        logger.exception("Failed to apply database migrations")
-        raise
 
 
 async def _bootstrap_admin() -> None:
@@ -95,13 +68,12 @@ async def _bootstrap_admin() -> None:
 async def lifespan(app: FastAPI):
     cloud_sql = None
 
-    # Apply database migrations on startup (disable with AUTO_MIGRATE=false)
-    if os.environ.get("AUTO_MIGRATE", "true").lower() in ("true", "1", "yes"):
-        logger.info("Applying database migrations...")
-        _apply_migrations()
-        logger.info("Database migrations applied successfully.")
-    else:
-        logger.info("AUTO_MIGRATE is disabled — skipping automatic migrations.")
+    # Migrations are never applied here; fail fast if the schema is behind
+    try:
+        await asyncio.to_thread(check_schema_up_to_date)
+    except SchemaNotUpToDateError as exc:
+        logger.error("%s", exc)
+        raise
 
     # Initialize Cloud SQL async connector
     if settings.cloud_sql_instance:
