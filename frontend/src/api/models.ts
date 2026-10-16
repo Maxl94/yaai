@@ -1,7 +1,7 @@
 import client from './client'
 import type { Model, ModelVersion, SchemaFieldCreate, DriftResult, InferenceVolumeBucket, ApiResponse, PaginatedResponse } from '@/types'
 
-async function list(params: { project_id?: string } = {}): Promise<Model[]> {
+async function list(params: { project_id?: string; page_size?: number } = {}): Promise<Model[]> {
   const response = await client.get<PaginatedResponse<Model>>('/models', { params })
   return response.data.data
 }
