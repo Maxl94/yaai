@@ -1,8 +1,5 @@
 x-yaai-app: &yaai-app
   image: yaai-dev:local
-  build:
-    context: .
-    dockerfile: Dockerfile.dev
   env_file:
     - .env
   environment:
@@ -25,9 +22,13 @@ services:
       timeout: 3s
       retries: 5
 
-  # One-shot job: applies database migrations before the backend starts
+  # One-shot job: applies database migrations before the backend starts.
+  # It owns the image build; the backend reuses the built image.
   migrate:
     <<: *yaai-app
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
     command: [".venv/bin/python", "-m", "yaai.server.migrate"]
     restart: "no"
     depends_on:
@@ -36,6 +37,7 @@ services:
 
   backend:
     <<: *yaai-app
+    pull_policy: never
     ports:
       - "8000:8000"
     depends_on:
