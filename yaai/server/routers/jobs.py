@@ -12,6 +12,7 @@ from yaai.server.auth.dependencies import (
     get_accessible_model_ids,
     require_auth,
     resolve_model_id_from_job,
+    resolve_model_id_from_version,
 )
 from yaai.server.database import get_db
 from yaai.server.schemas.job import (
@@ -186,10 +187,13 @@ async def list_notifications(
 @router.patch("/notifications/{notification_id}")
 async def mark_notification_read(
     notification_id: uuid.UUID,
-    _identity: CurrentIdentity = Depends(require_auth),
+    identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     svc = JobService(db)
+    existing = await svc.get_notification(notification_id)
+    model_id = await resolve_model_id_from_version(existing.model_version_id, db)
+    await check_model_read_access(model_id, identity, db)
     notification = await svc.mark_notification_read(notification_id)
     return {"data": NotificationRead.model_validate(notification)}
 

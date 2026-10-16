@@ -311,12 +311,17 @@ class JobService:
         query = query.order_by(Notification.created_at.desc())
         return await paginate_query(self.db, query, page, page_size)
 
-    async def mark_notification_read(self, notification_id: uuid.UUID) -> Notification:
-        """Mark a single notification as read."""
+    async def get_notification(self, notification_id: uuid.UUID) -> Notification:
+        """Fetch a notification by ID or raise 404."""
         result = await self.db.execute(select(Notification).where(Notification.id == notification_id))
         notification = result.scalar_one_or_none()
         if not notification:
             raise HTTPException(status_code=404, detail="Notification not found")
+        return notification
+
+    async def mark_notification_read(self, notification_id: uuid.UUID) -> Notification:
+        """Mark a single notification as read."""
+        notification = await self.get_notification(notification_id)
         notification.is_read = True
         await self.db.commit()
         await self.db.refresh(notification)
