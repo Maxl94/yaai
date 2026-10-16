@@ -10,7 +10,13 @@ service account in notification_reads. notifications.is_read is kept as the
 global fallback for deployments running with authentication disabled.
 
 Existing notifications with is_read = true are backfilled as read for every
-existing user, preserving what users currently see.
+existing user, preserving what users currently see. Notifications that predate a
+reader are treated as read for that reader at query time, so new users and service
+accounts do not start with the historic backlog as unread.
+
+The downgrade is lossy: per-reader read state written after the upgrade is dropped
+and the global notifications.is_read flag is not updated, so notifications read
+since the upgrade show as unread again.
 """
 
 from collections.abc import Sequence
@@ -41,8 +47,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["service_account_id"], ["service_accounts.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("notification_id", "user_id", name="uq_notification_reads_user"),
-        sa.UniqueConstraint("notification_id", "service_account_id", name="uq_notification_reads_sa"),
+        # reader column first so the unique indexes also serve the ON DELETE CASCADE lookups
+        sa.UniqueConstraint("user_id", "notification_id", name="uq_notification_reads_user"),
+        sa.UniqueConstraint("service_account_id", "notification_id", name="uq_notification_reads_sa"),
     )
     op.create_index("ix_notification_reads_notification", "notification_reads", ["notification_id"])
 

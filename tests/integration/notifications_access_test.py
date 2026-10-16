@@ -1,5 +1,6 @@
 """Access control and per-reader read state for notifications against real PostgreSQL."""
 
+import asyncio
 import uuid
 
 import pytest
@@ -13,7 +14,8 @@ from tests.integration.conftest import AUTH_CONFIG, PG_AVAILABLE, make_pg_app
 from tests.integration.notifications_test import _setup_drifted
 from yaai.server.auth.jwt import create_access_token
 from yaai.server.auth.passwords import hash_password
-from yaai.server.models.auth import AuthProvider, User, UserRole
+from yaai.server.auth.service_auth import hash_api_key
+from yaai.server.models.auth import APIKey, AuthProvider, User, UserRole
 from yaai.server.models.job import Notification, NotificationReadReceipt
 
 pytestmark = pytest.mark.skipif(not PG_AVAILABLE, reason="Docker not available")
@@ -83,6 +85,7 @@ async def test_mark_nonexistent_notification_returns_404(owner_client: AsyncClie
 
 async def _make_user_client(pg_session_factory: async_sessionmaker, pg_db: AsyncSession, name: str) -> AsyncClient:
     """Seed a viewer user and return a client authenticated as that user."""
+    await pg_db.commit()  # end the open transaction: server-side now() would otherwise predate earlier notifications
     user = User(
         username=name,
         email=f"{name}@example.com",
@@ -165,9 +168,9 @@ async def test_is_read_filter_applies_per_user(owner_client: AsyncClient, viewer
 
 
 async def test_sa_read_state_is_separate(owner_client: AsyncClient, pg_session_factory: async_sessionmaker):
+    sa_id, raw_key = await _create_sa(owner_client, "reader-sa")
     model_id, _, _ = await _setup_drifted(owner_client)
     notification_id = await _first_notification_id(owner_client)
-    sa_id, raw_key = await _create_sa(owner_client, "reader-sa")
     await _grant_access(owner_client, model_id, sa_id)
 
     async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
@@ -182,10 +185,10 @@ async def test_sa_read_state_is_separate(owner_client: AsyncClient, pg_session_f
 async def test_sa_mark_all_read_only_marks_accessible_models(
     owner_client: AsyncClient, pg_session_factory: async_sessionmaker
 ):
+    sa_id, raw_key = await _create_sa(owner_client, "scoped-sa")
     model_a, _, _ = await _setup_drifted(owner_client, model_name="notif-model-a")
     await _setup_drifted(owner_client, model_name="notif-model-b")
     all_unread = await _unread_ids(owner_client)
-    sa_id, raw_key = await _create_sa(owner_client, "scoped-sa")
     await _grant_access(owner_client, model_a, sa_id)
 
     async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
@@ -246,3 +249,103 @@ async def test_deleted_user_with_valid_token_gets_401(
     async with ghost_client:
         resp = await ghost_client.patch(f"/api/v1/notifications/{notification_id}", json={"is_read": True})
         assert resp.status_code == 401
+
+
+async def test_list_notifications_as_deleted_user_gets_401(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker, pg_db: AsyncSession
+):
+    await _setup_drifted(owner_client)
+    ghost_client = await _make_user_client(pg_session_factory, pg_db, "ghost-lister")
+    await pg_db.execute(delete(User).where(User.id == ghost_client.user_id))  # type: ignore[attr-defined]
+    await pg_db.commit()
+
+    async with ghost_client:
+        assert (await ghost_client.get("/api/v1/notifications")).status_code == 401
+        assert (await ghost_client.post("/api/v1/notifications/mark-all-read")).status_code == 401
+
+
+async def test_api_key_without_service_account_gets_empty_results(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker, pg_db: AsyncSession
+):
+    await _setup_drifted(owner_client)
+    raw_key = "yaai_unlinked-key-for-notification-test"
+    pg_db.add(APIKey(name="unlinked", key_hash=hash_api_key(raw_key), key_prefix=raw_key[:8]))
+    await pg_db.commit()
+
+    async with await _make_sa_client(pg_session_factory, raw_key) as client:
+        resp = await client.get("/api/v1/notifications")
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []
+        assert resp.json()["meta"]["total"] == 0
+        resp = await client.post("/api/v1/notifications/mark-all-read")
+        assert resp.status_code == 200
+        assert resp.json()["data"]["marked_read"] == 0
+
+
+async def test_concurrent_mark_read_is_idempotent(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker, pg_db: AsyncSession
+):
+    await _setup_drifted(owner_client)
+    notification_id = await _first_notification_id(owner_client)
+
+    responses = await asyncio.gather(
+        *(owner_client.patch(f"/api/v1/notifications/{notification_id}", json={"is_read": True}) for _ in range(4))
+    )
+    assert [r.status_code for r in responses] == [200] * 4
+    count = (await pg_db.execute(select(func.count()).select_from(NotificationReadReceipt))).scalar_one()
+    assert count == 1
+
+
+async def test_concurrent_mark_all_read_does_not_overcount(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker, pg_db: AsyncSession
+):
+    await _setup_drifted(owner_client)
+    total = len(await _unread_ids(owner_client))
+
+    responses = await asyncio.gather(*(owner_client.post("/api/v1/notifications/mark-all-read") for _ in range(3)))
+    assert all(r.status_code == 200 for r in responses)
+    assert sum(r.json()["data"]["marked_read"] for r in responses) == total
+    count = (await pg_db.execute(select(func.count()).select_from(NotificationReadReceipt))).scalar_one()
+    assert count == total
+
+
+async def test_new_user_sees_history_as_read(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker, pg_db: AsyncSession
+):
+    await _setup_drifted(owner_client, model_name="old-model")
+    new_client = await _make_user_client(pg_session_factory, pg_db, "late-user")
+    async with new_client:
+        assert await _unread_ids(new_client) == set()
+        resp = await new_client.get("/api/v1/notifications", params={"is_read": True})
+        assert resp.json()["meta"]["total"] == len(await _unread_ids(owner_client))
+        assert all(n["is_read"] for n in resp.json()["data"])
+
+        await _setup_drifted(owner_client, model_name="new-model")
+        unread = await _unread_ids(new_client)
+        assert 0 < len(unread) < len(await _unread_ids(owner_client))
+
+        resp = await new_client.post("/api/v1/notifications/mark-all-read")
+        assert resp.json()["data"]["marked_read"] == len(unread)
+        assert await _unread_ids(new_client) == set()
+    # only notifications newer than the reader get a receipt
+    stmt = (
+        select(func.count())
+        .select_from(NotificationReadReceipt)
+        .where(
+            NotificationReadReceipt.user_id == new_client.user_id  # type: ignore[attr-defined]
+        )
+    )
+    assert (await pg_db.execute(stmt)).scalar_one() == len(unread)
+
+
+async def test_new_service_account_sees_history_as_read(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    model_id, _, _ = await _setup_drifted(owner_client, model_name="sa-old-model")
+    sa_id, raw_key = await _create_sa(owner_client, "late-sa")
+    await _grant_access(owner_client, model_id, sa_id)
+
+    async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
+        assert await _unread_ids(sa_client) == set()
+        resp = await sa_client.post("/api/v1/notifications/mark-all-read")
+        assert resp.json()["data"]["marked_read"] == 0

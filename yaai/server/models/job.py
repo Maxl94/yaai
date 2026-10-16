@@ -115,8 +115,9 @@ class NotificationReadReceipt(UUIDMixin, Base):
     __tablename__ = "notification_reads"
     __table_args__ = (
         CheckConstraint("(user_id IS NULL) <> (service_account_id IS NULL)", name="ck_notification_reads_one_reader"),
-        UniqueConstraint("notification_id", "user_id", name="uq_notification_reads_user"),
-        UniqueConstraint("notification_id", "service_account_id", name="uq_notification_reads_sa"),
+        # reader column first so the unique indexes also serve the ON DELETE CASCADE lookups
+        UniqueConstraint("user_id", "notification_id", name="uq_notification_reads_user"),
+        UniqueConstraint("service_account_id", "notification_id", name="uq_notification_reads_sa"),
         Index("ix_notification_reads_notification", "notification_id"),
     )
 
