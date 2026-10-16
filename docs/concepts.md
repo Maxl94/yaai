@@ -116,7 +116,7 @@ The time range is adjustable. Tabs filter by input vs. output fields.
 
 YAAI supports four auth methods:
 
-- **Local accounts** -- username + password, enabled by default. An admin account is created on first startup with a randomly generated password (check the server logs). Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
+- **Local accounts** -- username + password, enabled by default. An admin account is created on first startup with a randomly generated password (written to a 0600 file, never logged -- see [Server Setup](server-setup.md#default-admin-account)). Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
 - **Google OAuth** -- for human users via browser. Disabled by default. When enabled, local auth is automatically disabled.
 - **API keys** -- for service accounts and SDK clients (`X-API-Key: yaam_...`). Enabled by default. Keys are scoped per-model.
 - **Google service accounts** -- for GCP workloads using Application Default Credentials and ID token verification.

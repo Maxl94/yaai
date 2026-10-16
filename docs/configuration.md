@@ -83,6 +83,26 @@ includes a `sample_info` object:
 
 ---
 
+## Security and multi-instance operation
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENVIRONMENT` | `development` | `production` / `prod` enforces secrets and disables the API docs by default. |
+| `AUTH_JWT_SECRET` | *(none)* | JWT signing secret. **Required in production** (ephemeral secret in development). |
+| `SESSION_SECRET` | *(none)* | Session/OAuth state secret. **Required in production** (ephemeral secret in development). |
+| `BOOTSTRAP_ADMIN_PASSWORD` | *(generated)* | Initial `admin` password, min. 12 characters. |
+| `BOOTSTRAP_ADMIN_PASSWORD_FILE` | `./admin-initial-password.txt` | File (mode `0600`) receiving the generated initial admin password. The password is never logged. |
+| `API_DOCS_ENABLED` | `true` / `false` in production | Expose `/docs`, `/redoc` and `/openapi.json`. |
+| `SECURITY_HEADERS_ENABLED` | `true` | Add CSP, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and HSTS (over HTTPS). |
+| `RATE_LIMIT_ENABLED` | `true` | Enable rate limiting. |
+| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `0` | Trusted reverse proxies in front of the server; `1` on Cloud Run. Client IP is the N-th `X-Forwarded-For` entry from the right. |
+| `RATE_LIMIT_STORAGE_URI` | `memory://` | Rate limit storage backend, e.g. `redis://host:6379` (the Redis client must be installed separately). |
+| `SCHEDULER_ENABLED` | `true` | Run the drift job scheduler in this instance. |
+
+See [Deployment](deployment.md#running-multiple-instances) for running more than one instance.
+
+---
+
 ## Environment file
 
 Place a `.env` file in the directory where the server starts:
