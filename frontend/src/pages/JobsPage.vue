@@ -232,10 +232,17 @@ async function loadVersionProjects() {
   try {
     const models = await modelsApi.list({ page_size: 100 })
     const writable = models.filter((m) => projectsStore.canWrite(m.project_id))
-    const versionLists = await Promise.all(writable.map((m) => modelsApi.listVersions(m.id)))
-    versionProjects.value = Object.fromEntries(
-      versionLists.flatMap((versions, i) => versions.map((v) => [v.id, writable[i]!.project_id] as const)),
-    )
+    // The list endpoint omits versions, so each model's details are fetched; one failing model must not drop the rest
+    const details = await Promise.allSettled(writable.map((m) => modelsApi.get(m.id)))
+    const entries: [string, string | null | undefined][] = []
+    details.forEach((result, i) => {
+      if (result.status === 'rejected') {
+        console.error(`Failed to resolve versions of model ${writable[i]!.id}:`, result.reason)
+        return
+      }
+      for (const v of result.value.versions ?? []) entries.push([v.id, writable[i]!.project_id])
+    })
+    versionProjects.value = Object.fromEntries(entries)
   } catch (error) {
     console.error('Failed to resolve job permissions:', error)
   }

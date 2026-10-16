@@ -7,12 +7,12 @@ import { jobsApi } from '@/api/jobs'
 import { modelsApi } from '@/api/models'
 import { projectsApi } from '@/api/projects'
 import { createTestVuetify, makeProject, makeUser } from '@/test/helpers'
-import type { JobConfig, Model, ModelVersion } from '@/types'
+import type { JobConfig, Model } from '@/types'
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: {} }) }))
 vi.mock('@/api/auth', () => ({ authApi: {} }))
 vi.mock('@/api/projects', () => ({ projectsApi: { list: vi.fn() } }))
-vi.mock('@/api/models', () => ({ modelsApi: { list: vi.fn(), listVersions: vi.fn(), get: vi.fn(), getVersion: vi.fn() } }))
+vi.mock('@/api/models', () => ({ modelsApi: { list: vi.fn(), get: vi.fn(), getVersion: vi.fn() } }))
 vi.mock('@/api/jobs', () => ({
   jobsApi: { list: vi.fn(), update: vi.fn(), trigger: vi.fn(), backfill: vi.fn(), getHistory: vi.fn() },
 }))
@@ -37,9 +37,11 @@ function makeJob(overrides: Partial<JobConfig>): JobConfig {
   }
 }
 
+// Mirrors the real API: the list endpoint has no versions, only the model details do
 const model = (id: string, projectId: string) =>
   ({ id, name: id, project_id: projectId }) as unknown as Model
-const version = (id: string) => ({ id }) as unknown as ModelVersion
+const modelDetails = (id: string, projectId: string, versionId: string) =>
+  ({ ...model(id, projectId), versions: [{ id: versionId }] }) as unknown as Model
 
 let wrapper: VueWrapper | null = null
 
@@ -66,9 +68,11 @@ beforeEach(() => {
       makeJob({ id: 'jc', name: 'job-unknown', model_version_id: 'vx' }),
     ])
   vi.mocked(modelsApi.list).mockReset().mockResolvedValue([model('ma', 'pa'), model('mb', 'pb')])
-  vi.mocked(modelsApi.listVersions)
+  vi.mocked(modelsApi.get)
     .mockReset()
-    .mockImplementation(async (modelId: string) => [version(modelId === 'ma' ? 'va' : 'vb')])
+    .mockImplementation(async (modelId: string) =>
+      modelId === 'ma' ? modelDetails('ma', 'pa', 'va') : modelDetails('mb', 'pb', 'vb'),
+    )
   vi.mocked(jobsApi.trigger).mockReset().mockResolvedValue({} as never)
 })
 
@@ -95,8 +99,20 @@ describe('JobsPage per-job write gating on the global page', () => {
 
   it('does not resolve versions of read-only projects', async () => {
     await mountPage('viewer')
-    expect(modelsApi.listVersions).toHaveBeenCalledTimes(1)
-    expect(modelsApi.listVersions).toHaveBeenCalledWith('ma')
+    expect(modelsApi.get).toHaveBeenCalledTimes(1)
+    expect(modelsApi.get).toHaveBeenCalledWith('ma')
+  })
+
+  it('keeps permissions of other models when one model lookup fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(modelsApi.list).mockResolvedValue([model('ma', 'pa'), model('mc', 'pa')])
+    vi.mocked(modelsApi.get).mockImplementation(async (modelId: string) => {
+      if (modelId === 'mc') throw new Error('boom')
+      return modelDetails('ma', 'pa', 'va')
+    })
+    await mountPage('viewer')
+    expect(hasAction('job-a', 'mdi-play')).toBe(true)
+    expect(hasAction('job-b', 'mdi-play')).toBe(false)
   })
 
   it('shows every action to a global owner without resolving projects', async () => {
