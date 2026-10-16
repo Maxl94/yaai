@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,6 +111,9 @@ class AuthService:
         if user is None:
             return None
         was_active = user.is_active
+        new_role = kwargs.get("role")
+        if (kwargs.get("is_active") is False) or (new_role is not None and UserRole(new_role) != UserRole.OWNER):
+            await self._ensure_other_active_owner(user)
         for key, value in kwargs.items():
             if key not in self._UPDATABLE_USER_FIELDS:
                 continue
@@ -132,12 +135,27 @@ class AuthService:
         user = await self.get_user_by_id(user_id)
         if user is None:
             return False
+        await self._ensure_other_active_owner(user)
         await self.db.delete(user)
         await self.db.commit()
         return True
 
+    async def _ensure_other_active_owner(self, user: User) -> None:
+        """Raise 409 if the user is the last active owner (no other active owner would remain)."""
+        if user.role != UserRole.OWNER or not user.is_active:
+            return
+        stmt = (
+            select(func.count())
+            .select_from(User)
+            .where(User.role == UserRole.OWNER, User.is_active.is_(True), User.id != user.id)
+        )
+        if (await self.db.execute(stmt)).scalar_one() == 0:
+            raise HTTPException(status_code=409, detail="At least one active owner is required")
+
     async def change_password(self, user: User, new_password: str) -> User:
+        """Set a new password and revoke all of the user's refresh tokens in a single transaction."""
         user.hashed_password = hash_password(new_password)
+        await self.db.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
         await self.db.commit()
         await self.db.refresh(user)
         return user

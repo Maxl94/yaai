@@ -17,6 +17,7 @@ from yaai.server.auth.dependencies import (
     check_model_write_access,
     get_accessible_model_ids,
     get_auth_config,
+    get_current_identity,
     require_auth,
     require_owner,
     resolve_model_id_from_job,
@@ -78,23 +79,83 @@ class TestGetAuthConfig:
         set_auth_config(AuthConfig(enabled=False))
 
 
+def _db_returning(user):
+    db = AsyncMock()
+    db.get.return_value = user
+    return db
+
+
+def _user(role=UserRole.OWNER, is_active=True, user_id=None):
+    return MagicMock(id=user_id or uuid.uuid4(), role=role, is_active=is_active, username="alice")
+
+
 class TestTryJwt:
     async def test_valid_access_token(self, auth_config):
-        token = create_access_token(auth_config, subject="user-1", role="owner")
-        identity = await _try_jwt(auth_config, token)
+        user = _user()
+        token = create_access_token(auth_config, subject=str(user.id), role="owner")
+        identity = await _try_jwt(auth_config, token, _db_returning(user))
         assert identity is not None
-        assert identity.user_id == "user-1"
+        assert identity.user_id == str(user.id)
         assert identity.role == UserRole.OWNER
         assert identity.identity_type == "user"
+        assert identity.username == "alice"
+
+    async def test_role_comes_from_database_not_token(self, auth_config):
+        user = _user(role=UserRole.VIEWER)
+        token = create_access_token(auth_config, subject=str(user.id), role="owner")
+        identity = await _try_jwt(auth_config, token, _db_returning(user))
+        assert identity is not None
+        assert identity.role == UserRole.VIEWER
+        assert identity.is_owner is False
+
+    async def test_deleted_user_rejected(self, auth_config):
+        token = create_access_token(auth_config, subject=str(uuid.uuid4()), role="owner")
+        with pytest.raises(HTTPException) as exc:
+            await _try_jwt(auth_config, token, _db_returning(None))
+        assert exc.value.status_code == 401
+
+    async def test_inactive_user_rejected(self, auth_config):
+        user = _user(is_active=False)
+        token = create_access_token(auth_config, subject=str(user.id), role="owner")
+        with pytest.raises(HTTPException) as exc:
+            await _try_jwt(auth_config, token, _db_returning(user))
+        assert exc.value.status_code == 401
+
+    async def test_malformed_subject_rejected(self, auth_config):
+        token = create_access_token(auth_config, subject="not-a-uuid", role="owner")
+        db = _db_returning(None)
+        with pytest.raises(HTTPException) as exc:
+            await _try_jwt(auth_config, token, db)
+        assert exc.value.status_code == 401
+        db.get.assert_not_called()
 
     async def test_refresh_token_rejected(self, auth_config):
-        token, _ = create_refresh_token(auth_config, subject="user-1", role="owner")
-        identity = await _try_jwt(auth_config, token)
-        assert identity is None
+        token, _ = create_refresh_token(auth_config, subject=str(uuid.uuid4()), role="owner")
+        db = _db_returning(None)
+        assert await _try_jwt(auth_config, token, db) is None
+        db.get.assert_not_called()
 
     async def test_invalid_token_returns_none(self, auth_config):
-        identity = await _try_jwt(auth_config, "garbage-token")
-        assert identity is None
+        assert await _try_jwt(auth_config, "garbage-token", _db_returning(None)) is None
+
+
+class TestGetCurrentIdentityNoFallthrough:
+    async def test_jwt_of_deleted_user_is_not_rescued_by_api_key(self, auth_config):
+        token = create_access_token(auth_config, subject=str(uuid.uuid4()), role="owner")
+        credentials = MagicMock(credentials=token)
+        sa_identity = CurrentIdentity(user_id=None, role=UserRole.VIEWER, identity_type="service_account_api_key")
+        with (
+            patch("yaai.server.auth.dependencies._try_api_key", new_callable=AsyncMock) as mock_api_key,
+            patch("yaai.server.auth.dependencies._try_google_sa", new_callable=AsyncMock) as mock_google_sa,
+            patch("yaai.server.auth.dependencies._try_google_user", new_callable=AsyncMock) as mock_google_user,
+        ):
+            mock_api_key.return_value = sa_identity
+            with pytest.raises(HTTPException) as exc:
+                await get_current_identity(credentials, "valid-sa-key", _db_returning(None))
+        assert exc.value.status_code == 401
+        mock_api_key.assert_not_awaited()
+        mock_google_sa.assert_not_awaited()
+        mock_google_user.assert_not_awaited()
 
 
 class TestTryApiKey:
