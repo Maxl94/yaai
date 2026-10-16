@@ -37,6 +37,7 @@ The schema is the config.
 - **[Deployment](deployment.md)** -- Docker Compose, pip install, Google Cloud SQL
 - **[Core Concepts](concepts.md)** -- models, versions, schemas, drift -- how the pieces fit
 - **[Drift Detection Guide](drift-guide.md)** -- PSI, KS test, Chi-squared, JSD explained with visuals
+- **[LLM & Agent Monitoring](llm-monitoring.md)** -- monitor LLM apps with metadata drift (tokens, latency, cost), no raw prompts
 - **[Architecture](architecture.md)** -- system design, tech stack, how the backend is structured
 - **[REST API Reference](reference/api.md)** -- full OpenAPI spec, auto-generated from the server
 - **[Python SDK Reference](reference/sdk.md)** -- async client docs, auto-generated from source

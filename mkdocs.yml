@@ -51,6 +51,7 @@ nav:
   - Learn:
       - Core Concepts: concepts.md
       - Drift Detection: drift-guide.md
+      - LLM & Agent Monitoring: llm-monitoring.md
       - Architecture: architecture.md
   - Reference:
       - REST API: reference/api.md
