@@ -1,8 +1,10 @@
 """Unit tests for safe static file resolution."""
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-from yaai.server.spa import resolve_static_file
+from yaai.server.spa import is_api_path, mount_spa, resolve_static_file
 
 
 @pytest.fixture
@@ -51,3 +53,45 @@ def test_symlink_escaping_root_returns_none(static_dir, tmp_path):
 
 def test_null_byte_returns_none(static_dir):
     assert resolve_static_file(static_dir, "a\x00b") is None
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [("api", True), ("api/v1/does-not-exist", True), ("api/v2/x", True), ("apiary", False), ("models/123", False)],
+)
+def test_is_api_path(requested, expected):
+    assert is_api_path(requested, "/api/v1") is expected
+
+
+@pytest.fixture
+def client(static_dir):
+    app = FastAPI()
+
+    @app.get("/api/v1/ping")
+    async def ping():
+        return {"ok": True}
+
+    mount_spa(app, static_dir, "/api/v1")
+    return TestClient(app)
+
+
+def test_known_api_route_still_served(client):
+    assert client.get("/api/v1/ping").json() == {"ok": True}
+
+
+@pytest.mark.parametrize("path", ["/api/v1/does-not-exist", "/api/anything", "/api"])
+def test_unknown_api_path_returns_json_404(client, path):
+    response = client.get(path)
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/json"
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_spa_deep_link_serves_index(client):
+    response = client.get("/models/123")
+    assert response.status_code == 200
+    assert response.text == "index"
+
+
+def test_static_asset_is_served(client):
+    assert client.get("/assets/app.js").text == "js"
