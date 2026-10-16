@@ -1,8 +1,10 @@
 """Integration tests for explicit migrations and the startup schema check (real PostgreSQL)."""
 
+import logging
 import uuid
 
 import pytest
+from alembic import command
 from sqlalchemy import create_engine, text
 
 from yaai.server import migrate
@@ -43,20 +45,55 @@ def test_check_passes_after_migrations(isolated_db):
     engine = create_engine(settings.database_url_sync)
     try:
         with engine.connect() as conn:
-            current, head = migrate.get_migration_status(conn)
+            status = migrate.get_migration_status(conn)
     finally:
         engine.dispose()
-    assert current == head
+    assert status.is_up_to_date
 
 
 def test_check_fails_when_database_is_behind(isolated_db):
+    command.upgrade(migrate._alembic_config(), "7f3c318ce50f")
+
+    with pytest.raises(migrate.SchemaNotUpToDateError, match="7f3c318ce50f"):
+        migrate.check_schema_up_to_date()
+
+
+def test_run_migrations_upgrades_database_that_is_behind(isolated_db):
+    command.upgrade(migrate._alembic_config(), "7f3c318ce50f")
+
     migrate.run_migrations()
+
+    migrate.check_schema_up_to_date()
+
+
+def _stamp_unknown_revision() -> None:
     engine = create_engine(settings.database_url_sync)
     try:
         with engine.begin() as conn:
-            conn.execute(text("UPDATE alembic_version SET version_num = 'outdated_revision'"))
+            conn.execute(text("UPDATE alembic_version SET version_num = 'future_revision'"))
     finally:
         engine.dispose()
 
-    with pytest.raises(migrate.SchemaNotUpToDateError, match="outdated_revision"):
+
+def test_check_warns_and_continues_when_database_is_ahead(isolated_db):
+    migrate.run_migrations()
+    _stamp_unknown_revision()
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler(level=logging.WARNING)
+    handler.emit = records.append  # alembic's fileConfig drops root handlers, so caplog cannot be used here
+    migrate.logger.addHandler(handler)
+    try:
         migrate.check_schema_up_to_date()
+    finally:
+        migrate.logger.removeHandler(handler)
+
+    messages = [record.getMessage() for record in records]
+    assert any("future_revision" in m and "newer than this application" in m for m in messages)
+
+
+def test_run_migrations_refuses_database_that_is_ahead(isolated_db):
+    migrate.run_migrations()
+    _stamp_unknown_revision()
+
+    with pytest.raises(migrate.SchemaAheadError, match="future_revision"):
+        migrate.run_migrations()
