@@ -22,6 +22,16 @@ const headers = [
 
 const loading = computed(() => projectsStore.loading)
 const errorMain = ref('')
+const infoMain = ref('')
+
+const NO_PROJECTS_MESSAGE = 'You are not a member of any project yet. Ask an administrator to add you.'
+
+/** Reload projects and report a failed reload of this very request. */
+async function refreshProjects(): Promise<boolean> {
+  const ok = await projectsStore.load()
+  errorMain.value = ok ? '' : (projectsStore.loadError ?? 'Failed to load projects')
+  return ok
+}
 
 // Create / edit project
 const showProjectDialog = ref(false)
@@ -56,7 +66,7 @@ async function saveProject() {
       await projectsApi.create({ name, description: description || undefined })
     }
     showProjectDialog.value = false
-    await projectsStore.load()
+    await refreshProjects()
   } catch (error) {
     projectError.value = errorMessage(error, 'Failed to save project')
   } finally {
@@ -90,7 +100,7 @@ async function deleteProject() {
     await projectsApi.delete(projectToDelete.value.id)
     showDeleteDialog.value = false
     projectToDelete.value = null
-    await projectsStore.load()
+    await refreshProjects()
   } catch (error) {
     deleteError.value = errorMessage(error, 'Failed to delete project')
   } finally {
@@ -219,8 +229,18 @@ async function changeRole(member: ProjectMember, role: ProjectRole) {
     membersError.value = errorMessage(error, 'Failed to change role')
   }
   // Reload in both cases so the table reflects the server state (also after a rejected change)
-  await loadMembers(membersProject.value.id)
-  await projectsStore.load()
+  await reloadAfterMembershipChange(membersProject.value.id)
+}
+
+// Owners may demote or remove themselves; then the members list is no longer accessible to them
+async function reloadAfterMembershipChange(projectId: string) {
+  const refreshed = await refreshProjects()
+  if (refreshed && !projectsStore.canAdmin(projectId)) {
+    showMembersDialog.value = false
+    infoMain.value = 'You no longer manage this project, so its member list was closed.'
+    return
+  }
+  await loadMembers(projectId)
 }
 
 function confirmRemove(member: ProjectMember) {
@@ -238,14 +258,10 @@ async function removeMember() {
   }
   showRemoveDialog.value = false
   memberToRemove.value = null
-  await loadMembers(membersProject.value.id)
-  await projectsStore.load()
+  await reloadAfterMembershipChange(membersProject.value.id)
 }
 
-onMounted(async () => {
-  await projectsStore.load()
-  if (!projectsStore.loaded) errorMain.value = 'Failed to load projects'
-})
+onMounted(refreshProjects)
 </script>
 
 <template>
@@ -273,6 +289,14 @@ onMounted(async () => {
       {{ errorMain }}
     </v-alert>
 
+    <v-alert v-if="infoMain" type="info" variant="tonal" closable class="mb-4" @click:close="infoMain = ''">
+      {{ infoMain }}
+    </v-alert>
+
+    <v-alert v-if="projectsStore.hasNoProjects" type="info" variant="tonal" class="mb-4" data-testid="no-projects">
+      {{ NO_PROJECTS_MESSAGE }}
+    </v-alert>
+
     <v-card variant="flat" rounded="lg" class="projects-card">
       <v-data-table
         :headers="headers"
@@ -280,6 +304,7 @@ onMounted(async () => {
         :loading="loading"
         hover
         items-per-page="-1"
+        hide-default-footer
         density="comfortable"
         no-data-text="No projects available"
       >

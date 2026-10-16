@@ -154,3 +154,89 @@ describe('ModelsPage create dialog', () => {
     expect(push).not.toHaveBeenCalled()
   })
 })
+
+describe('ModelsPage project filter', () => {
+  const filter = () =>
+    wrapper!.findAllComponents({ name: 'VSelect' }).find((c) => c.attributes('data-testid') === 'project-switcher')
+
+  it('offers "All projects" plus every accessible project and updates the store', async () => {
+    await mountPage('viewer')
+    const items = filter()!.props('items') as { title: string; value: string }[]
+    expect(items.map((i) => i.title)).toEqual(['All projects', 'default', 'team-a'])
+
+    filter()!.vm.$emit('update:modelValue', 'team-a')
+    await flushPromises()
+    expect(useProjectsStore().currentProjectId).toBe('team-a')
+    expect(localStorage.getItem('yaai.currentProjectId')).toBe('team-a')
+
+    filter()!.vm.$emit('update:modelValue', '__all__')
+    await flushPromises()
+    expect(useProjectsStore().currentProjectId).toBeNull()
+  })
+
+  it('is hidden when only one project is accessible', async () => {
+    await mountPage('viewer', [projects[0]!])
+    expect(filter()).toBeUndefined()
+  })
+
+  it('does not filter by a stored project that is not accessible', async () => {
+    localStorage.setItem('yaai.currentProjectId', 'gone')
+    await mountPage('viewer')
+    expect(modelsApi.list).toHaveBeenCalledTimes(1)
+    expect(modelsApi.list).toHaveBeenCalledWith({})
+  })
+
+  it('ignores an outdated model list when the filter changes quickly', async () => {
+    await mountPage('viewer')
+    let resolveSlow!: (models: Model[]) => void
+    vi.mocked(modelsApi.list)
+      .mockReturnValueOnce(new Promise((resolve) => (resolveSlow = resolve)))
+      .mockResolvedValueOnce([makeModel({ id: 'm2', name: 'fresh-model' })])
+
+    useProjectsStore().setCurrentProject('team-a')
+    await flushPromises()
+    useProjectsStore().setCurrentProject('default')
+    await flushPromises()
+    resolveSlow([makeModel({ id: 'm3', name: 'stale-model' })])
+    await flushPromises()
+
+    expect(wrapper!.text()).toContain('fresh-model')
+    expect(wrapper!.text()).not.toContain('stale-model')
+  })
+})
+
+describe('ModelsPage without project access', () => {
+  it('tells users without any membership to ask for access', async () => {
+    vi.mocked(modelsApi.list).mockResolvedValue([])
+    await mountPage('viewer', [])
+    expect(wrapper!.find('[data-testid="no-projects"]').text()).toContain('You are not a member of any project yet')
+    expect(wrapper!.text()).not.toContain('No models yet')
+  })
+
+  it('shows the generic empty state to a global owner without models', async () => {
+    vi.mocked(modelsApi.list).mockResolvedValue([])
+    await mountPage('owner', [])
+    expect(wrapper!.find('[data-testid="no-projects"]').exists()).toBe(false)
+    expect(wrapper!.text()).toContain('No models yet')
+  })
+
+  it('shows a retryable error when the project list cannot be loaded', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const auth = useAuthStore()
+    auth.authConfig = { enabled: true, local_enabled: true, google_oauth_enabled: false, allow_registration: false }
+    auth.user = makeUser({ role: 'viewer' })
+    vi.mocked(projectsApi.list).mockRejectedValueOnce({ status: 503, message: 'x', detail: 'Service unavailable' })
+    wrapper = mount(ModelsPage, { global: { plugins: [pinia, createTestVuetify()] }, attachTo: document.body })
+    await flushPromises()
+
+    const alert = wrapper.find('[data-testid="projects-load-error"]')
+    expect(alert.text()).toContain('Service unavailable')
+
+    vi.mocked(projectsApi.list).mockResolvedValueOnce(projects)
+    await alert.find('button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="projects-load-error"]').exists()).toBe(false)
+  })
+})

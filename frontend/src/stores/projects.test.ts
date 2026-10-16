@@ -139,3 +139,60 @@ describe('loading', () => {
     expect(store.loaded).toBe(false)
   })
 })
+
+describe('stale and failed loads', () => {
+  it('drops a response that arrives after logout and lets the next user load fresh data', async () => {
+    const { auth, store } = setup('viewer')
+    let resolveFirst!: (value: typeof projects) => void
+    listMock.mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+    const pending = store.load()
+
+    auth.user = null
+    await nextTick()
+    resolveFirst(projects)
+    expect(await pending).toBe(false)
+    expect(store.projects).toEqual([])
+    expect(store.loaded).toBe(false)
+
+    listMock.mockResolvedValueOnce([projects[0]!])
+    await store.ensureLoaded()
+    expect(store.projects.map((p) => p.id)).toEqual(['default'])
+  })
+
+  it('does not let a stored selection filter when the project list failed to load', async () => {
+    localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, 'edit')
+    const { store } = setup('viewer')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    listMock.mockRejectedValueOnce({ status: 500, message: 'x', detail: 'Database unavailable' })
+    expect(await store.load()).toBe(false)
+    expect(store.loadError).toBe('Database unavailable')
+    expect(store.activeProjectId).toBeNull()
+    expect(store.canWrite('edit')).toBe(false)
+
+    expect(await store.load()).toBe(true)
+    expect(store.loadError).toBeNull()
+    expect(store.activeProjectId).toBe('edit')
+  })
+
+  it('keeps previously loaded projects when a reload fails', async () => {
+    const { store } = setup('viewer')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    await store.load()
+    listMock.mockRejectedValueOnce(new Error('boom'))
+    expect(await store.load()).toBe(false)
+    expect(store.projects).toHaveLength(3)
+    expect(store.loadError).toBe('Failed to load projects')
+  })
+
+  it('reports users without any project, but never global owners', async () => {
+    const { store } = setup('viewer')
+    listMock.mockResolvedValue([])
+    expect(store.hasNoProjects).toBe(false)
+    await store.load()
+    expect(store.hasNoProjects).toBe(true)
+
+    const { store: ownerStore } = setup('owner')
+    await ownerStore.load()
+    expect(ownerStore.hasNoProjects).toBe(false)
+  })
+})

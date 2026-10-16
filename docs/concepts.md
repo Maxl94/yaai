@@ -37,10 +37,10 @@ Memberships are always checked against the database, so changes take effect imme
 
 ### Projects in the web UI
 
-- **Project switcher** -- the bar at the top of every page lists "All projects" plus the projects you can access. The Models page is filtered by the selected project; the choice is remembered in the browser.
+- **Project filter** -- the header of the Models page has a "Project" selector (shown when you can access more than one project) listing "All projects" plus your projects. The model list is filtered by the selection and the choice is remembered in the browser; with "All projects" every model card shows its project. Jobs, Drift and Alerts always show everything you can access. Users who belong to no project see a hint to ask an administrator for access.
 - **Projects page** (`Projects` in the navigation, shown when authentication is enabled) -- lists your projects with model count and your role. Global owners can create, edit and delete projects (the `default` project and non-empty projects cannot be deleted). Project owners can edit their project and manage its members: add users by username, change roles and remove members. Global owners can also pick users and service accounts from a list. Other users see their projects read-only.
 - **Creating models** -- the "New Model" button is available to global owners and to editors/owners of at least one project; the dialog lets you choose the target project.
-- **Model details** -- show the model's project; global owners get a "Move to project" action. Edit, new version, schema, job and threshold actions are only shown to editors and owners of the model's project (the backend enforces the same rules).
+- **Model details** -- show the model's project; global owners get a "Move to project" action. Edit, new version, schema, job and threshold actions are only shown to editors and owners of the model's project (the backend enforces the same rules). On the global Jobs page, the job actions are shown per job according to the role in the job's project.
 - **Global user management** (users and service accounts) stays in *Settings* and is available to global owners only.
 
 ## Versions

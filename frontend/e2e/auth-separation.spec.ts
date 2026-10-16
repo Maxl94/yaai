@@ -103,13 +103,13 @@ test.describe('Owner UI', () => {
 
     await page.getByRole('link', { name: /projects/i }).click()
     await expect(page.locator('h1')).toContainText('Projects', { timeout: 10000 })
-    await expect(page.getByRole('cell', { name: seed.other_project.name })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('cell', { name: seed.other_project.name, exact: true })).toBeVisible({ timeout: 10000 })
 
     await page.getByTestId('create-project').click()
     await page.getByLabel('Project Name').fill(projectName)
     await page.getByRole('button', { name: 'Create', exact: true }).click()
 
-    await expect(page.getByRole('cell', { name: projectName })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('cell', { name: projectName, exact: true })).toBeVisible({ timeout: 10000 })
   })
 
   test('project switcher filters the model list', async ({ page }) => {
@@ -174,9 +174,8 @@ test.describe('Viewer UI', () => {
     await expect(page.getByText(seed.model_a.name)).toBeVisible({ timeout: 10000 })
     await expect(page.getByText(seed.hidden_model.name)).toHaveCount(0)
 
-    await page.getByTestId('project-switcher').click()
-    await expect(page.getByRole('option', { name: 'default', exact: true })).toBeVisible()
-    await expect(page.getByRole('option', { name: seed.other_project.name, exact: true })).toHaveCount(0)
+    // The viewer only belongs to the default project, so there is nothing to filter by
+    await expect(page.getByTestId('project-switcher')).toHaveCount(0)
   })
 
   test('viewer cannot open a model of a foreign project', async ({ page }) => {
@@ -188,7 +187,8 @@ test.describe('Viewer UI', () => {
     await page.getByRole('link', { name: /projects/i }).click()
     await expect(page.locator('h1')).toContainText('Projects', { timeout: 10000 })
     await expect(page.getByRole('cell', { name: 'default' }).first()).toBeVisible({ timeout: 10000 })
-    await expect(page.getByRole('cell', { name: seed.other_project.name })).toHaveCount(0)
+    await expect(page.getByRole('cell', { name: seed.other_project.name, exact: true })).toHaveCount(0)
     await expect(page.getByTestId('create-project')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^(Members of|Edit|Delete) / })).toHaveCount(0)
   })
 })

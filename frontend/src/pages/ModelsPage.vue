@@ -20,7 +20,18 @@ const creating = ref(false)
 const createError = ref<string | null>(null)
 const deleteError = ref<string | null>(null)
 
-const showProjectChip = computed(() => !projectsStore.currentProjectId)
+const ALL_PROJECTS = '__all__'
+
+const showProjectChip = computed(() => !projectsStore.activeProjectId)
+const showProjectFilter = computed(() => projectsStore.projects.length > 1)
+const projectFilterItems = computed(() => [
+  { title: 'All projects', value: ALL_PROJECTS },
+  ...projectsStore.projects.map((p) => ({ title: p.name, value: p.id })),
+])
+const selectedProject = computed({
+  get: () => projectsStore.activeProjectId ?? ALL_PROJECTS,
+  set: (value: string) => projectsStore.setCurrentProject(value === ALL_PROJECTS ? null : value),
+})
 const projectOptions = computed(() =>
   projectsStore.writableProjects.map((p) => ({ title: p.name, value: p.id })),
 )
@@ -37,16 +48,24 @@ const filteredModels = computed(() => {
   )
 })
 
-async function fetchModels() {
+let latestFetch = 0
+
+/** Fetch the model list; returns false if a newer request superseded this one. */
+async function fetchModels(): Promise<boolean> {
+  const requestId = ++latestFetch
   loading.value = true
   try {
-    const projectId = projectsStore.currentProjectId
-    models.value = await modelsApi.list(projectId ? { project_id: projectId } : {})
+    const projectId = projectsStore.activeProjectId
+    const result = await modelsApi.list(projectId ? { project_id: projectId } : {})
+    if (requestId !== latestFetch) return false
+    models.value = result
   } catch (error) {
+    if (requestId !== latestFetch) return false
     console.error('Failed to fetch models:', error)
   } finally {
-    loading.value = false
+    if (requestId === latestFetch) loading.value = false
   }
+  return true
 }
 
 async function checkModelHealth(model: Model) {
@@ -122,7 +141,7 @@ function confirmDelete(model: Model) {
 }
 
 async function loadModelsWithHealth() {
-  await fetchModels()
+  if (!(await fetchModels())) return
   // Fire background health checks for all models
   models.value.forEach(m => checkModelHealth(m))
 }
@@ -146,7 +165,7 @@ onMounted(async () => {
   await loadModelsWithHealth()
 })
 
-watch(() => projectsStore.currentProjectId, loadModelsWithHealth)
+watch(() => projectsStore.activeProjectId, loadModelsWithHealth)
 </script>
 
 <template>
@@ -168,16 +187,52 @@ watch(() => projectsStore.currentProjectId, loadModelsWithHealth)
       </v-btn>
     </div>
 
-    <!-- Search Bar -->
-    <v-text-field
-      v-model="search"
-      placeholder="Search models..."
-      prepend-inner-icon="mdi-magnify"
-      clearable
-      hide-details
-      class="search-field mb-6"
-      bg-color="surface-variant"
-    />
+    <v-alert
+      v-if="projectsStore.loadError"
+      type="error"
+      variant="tonal"
+      density="compact"
+      class="mb-4"
+      data-testid="projects-load-error"
+    >
+      {{ projectsStore.loadError }}
+      <template #append>
+        <v-btn variant="text" size="small" :loading="projectsStore.loading" @click="projectsStore.load()">Retry</v-btn>
+      </template>
+    </v-alert>
+
+    <!-- Search and project filter -->
+    <div class="d-flex flex-wrap align-center ga-4 mb-6">
+      <v-text-field
+        v-model="search"
+        placeholder="Search models..."
+        prepend-inner-icon="mdi-magnify"
+        clearable
+        hide-details
+        class="search-field"
+        bg-color="surface-variant"
+      />
+      <v-select
+        v-if="showProjectFilter"
+        v-model="selectedProject"
+        :items="projectFilterItems"
+        label="Project"
+        prepend-inner-icon="mdi-folder-outline"
+        hide-details
+        class="project-filter"
+        data-testid="project-switcher"
+      />
+    </div>
+
+    <v-alert
+      v-if="projectsStore.hasNoProjects"
+      type="info"
+      variant="tonal"
+      class="mb-6"
+      data-testid="no-projects"
+    >
+      You are not a member of any project yet. Ask an administrator to add you.
+    </v-alert>
 
     <!-- Loading State -->
     <div v-if="loading" class="loading-state">
@@ -279,7 +334,7 @@ watch(() => projectsStore.currentProjectId, loadModelsWithHealth)
     </v-row>
 
     <!-- Empty State -->
-    <div v-else class="empty-state">
+    <div v-else-if="!projectsStore.hasNoProjects" class="empty-state">
       <div class="empty-icon">
         <v-icon size="48" color="primary">mdi-cube-outline</v-icon>
       </div>
@@ -396,7 +451,13 @@ watch(() => projectsStore.currentProjectId, loadModelsWithHealth)
 }
 
 .search-field {
+  flex: 1 1 280px;
   max-width: 400px;
+}
+
+.project-filter {
+  max-width: 280px;
+  min-width: 200px;
 }
 
 .search-field :deep(.v-field) {

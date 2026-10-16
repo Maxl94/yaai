@@ -202,3 +202,75 @@ describe('ProjectsPage members', () => {
     expect(document.body.querySelector('[data-testid="members-error"]')?.textContent).toContain('last owner')
   })
 })
+
+describe('ProjectsPage membership edge cases', () => {
+  const reducedProjects = [
+    projects[0]!,
+    makeProject({ id: 'empty', name: 'empty-proj', my_role: 'editor' }),
+  ]
+
+  async function openMembers() {
+    await mountPage('viewer')
+    await button('Members of empty-proj').trigger('click')
+    await flushPromises()
+  }
+
+  it('closes the members dialog when an owner demotes themselves', async () => {
+    await openMembers()
+    vi.mocked(projectsApi.updateMemberRole).mockResolvedValue({ ...member, role: 'editor' })
+    vi.mocked(projectsApi.list).mockResolvedValue(reducedProjects)
+    vi.mocked(projectsApi.listMembers).mockClear()
+
+    const roleSelect = wrapper!.findAllComponents({ name: 'VSelect' }).find((c) => c.props('modelValue') === 'editor')!
+    roleSelect.vm.$emit('update:modelValue', 'viewer')
+    await flushPromises()
+
+    expect(projectsApi.updateMemberRole).toHaveBeenCalledWith('empty', 'mem1', 'viewer')
+    expect(projectsApi.listMembers).not.toHaveBeenCalled()
+    expect(wrapper!.text()).toContain('You no longer manage this project')
+    expect(button('Members of empty-proj').exists()).toBe(false)
+  })
+
+  it('closes the members dialog when an owner removes themselves', async () => {
+    await openMembers()
+    vi.mocked(projectsApi.removeMember).mockResolvedValue()
+    vi.mocked(projectsApi.list).mockResolvedValue([projects[0]!])
+    vi.mocked(projectsApi.listMembers).mockClear()
+    ;(document.body.querySelector('button[aria-label="Remove bob"]') as HTMLButtonElement).click()
+    await flushPromises()
+    bodyButton('Remove')!.click()
+    await flushPromises()
+
+    expect(projectsApi.listMembers).not.toHaveBeenCalled()
+    expect(wrapper!.text()).toContain('You no longer manage this project')
+  })
+
+  it('keeps the dialog open and shows the conflict when a change is rejected', async () => {
+    await openMembers()
+    vi.mocked(projectsApi.updateMemberRole).mockRejectedValue({ status: 409, message: 'x', detail: 'Cannot demote the last owner' })
+    const roleSelect = wrapper!.findAllComponents({ name: 'VSelect' }).find((c) => c.props('modelValue') === 'editor')!
+    roleSelect.vm.$emit('update:modelValue', 'viewer')
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-testid="members-error"]')?.textContent).toContain('last owner')
+    expect(wrapper!.text()).not.toContain('You no longer manage this project')
+  })
+
+  it('reports a failed reload even after an earlier successful load', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    await mountPage('owner')
+    vi.mocked(projectsApi.delete).mockResolvedValue()
+    vi.mocked(projectsApi.list).mockRejectedValue({ status: 500, message: 'x', detail: 'Database unavailable' })
+    await button('Delete empty-proj').trigger('click')
+    await flushPromises()
+    bodyButton('Delete')!.click()
+    await flushPromises()
+
+    expect(wrapper!.text()).toContain('Database unavailable')
+  })
+
+  it('explains to users without projects how to get access', async () => {
+    await mountPage('viewer', [])
+    expect(wrapper!.find('[data-testid="no-projects"]').text()).toContain('not a member of any project yet')
+  })
+})
