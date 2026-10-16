@@ -38,7 +38,10 @@ from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models import inference as _inference_models  # noqa: F401
 from yaai.server.models import job as _job_models  # noqa: F401
 from yaai.server.models import model as _model_models  # noqa: F401
+from yaai.server.models import project as _project_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, User, UserRole
+from yaai.server.models.project import ProjectMembership, ProjectRole
+from yaai.server.services.project_service import get_or_create_default_project
 
 AUTH_CONFIG = AuthConfig(
     enabled=True,
@@ -205,9 +208,16 @@ async def seeded_owner(pg_db: AsyncSession) -> User:
     return user
 
 
+async def add_default_project_membership(db: AsyncSession, user: User, role: ProjectRole = ProjectRole.VIEWER) -> None:
+    """Make the user a member of the default project (where models are created unless a project is given)."""
+    project = await get_or_create_default_project(db)
+    db.add(ProjectMembership(project_id=project.id, user_id=user.id, role=role))
+    await db.commit()
+
+
 @pytest.fixture
 async def seeded_viewer(pg_db: AsyncSession) -> User:
-    """Seed a viewer user into the PG database."""
+    """Seed a viewer user that is a (viewer) member of the default project, like users after the migration."""
     user = User(
         username="pg-viewer",
         email="pg-viewer@example.com",
@@ -219,6 +229,7 @@ async def seeded_viewer(pg_db: AsyncSession) -> User:
     pg_db.add(user)
     await pg_db.commit()
     await pg_db.refresh(user)
+    await add_default_project_membership(pg_db, user)
     return user
 
 

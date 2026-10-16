@@ -64,7 +64,8 @@ def _clean_db(dsn: str) -> None:
                          refresh_tokens, drift_results, notifications,
                          job_runs, job_configs, ground_truth,
                          reference_data, inference_data, schema_fields,
-                         model_versions, models, users
+                         model_versions, models, project_memberships,
+                         projects, users
                 CASCADE
                 """
             )
@@ -189,6 +190,17 @@ def main() -> None:
     assert model_b_resp.status_code == 201, f"Create Model-B failed: {model_b_resp.text}"
     model_b_id = model_b_resp.json()["data"]["id"]
     print(f"  Model-B: {model_b_id}")
+
+    print("7b. Adding viewer to the project of the models (default project)...")
+    r = client.get(f"{base_url}/api/v1/projects", headers=headers)
+    assert r.status_code == 200, f"List projects failed: {r.text}"
+    default_project_id = next(p["id"] for p in r.json()["data"] if p["is_default"])
+    r = client.post(
+        f"{base_url}/api/v1/projects/{default_project_id}/members",
+        json={"username": VIEWER_USERNAME, "role": "viewer"},
+        headers=headers,
+    )
+    assert r.status_code == 201, f"Add viewer to default project failed: {r.status_code} {r.text}"
 
     print("8. Granting model access...")
     r = client.post(

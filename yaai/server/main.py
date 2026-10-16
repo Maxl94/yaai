@@ -23,9 +23,10 @@ from yaai.server.auth.passwords import hash_password
 from yaai.server.config import settings
 from yaai.server.migrate import SchemaNotUpToDateError, check_schema_up_to_date
 from yaai.server.models import auth as _auth_models  # noqa: F401
+from yaai.server.models import project as _project_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, User, UserRole
 from yaai.server.rate_limit import limiter
-from yaai.server.routers import auth, dashboard, inferences, jobs, models, schema
+from yaai.server.routers import auth, dashboard, inferences, jobs, models, projects, schema
 from yaai.server.scheduler import load_active_jobs, scheduler
 
 logging.basicConfig(
@@ -161,6 +162,7 @@ app.add_middleware(SessionMiddleware, secret_key=_session_secret)
 API_PREFIX = "/api/v1"
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(models.router, prefix=API_PREFIX)
+app.include_router(projects.router, prefix=API_PREFIX)
 app.include_router(inferences.router, prefix=API_PREFIX)
 app.include_router(jobs.router, prefix=API_PREFIX)
 app.include_router(dashboard.router, prefix=API_PREFIX)

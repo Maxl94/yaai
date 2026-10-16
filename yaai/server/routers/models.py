@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yaai.schemas.common import PaginationMeta
@@ -23,14 +23,17 @@ from yaai.server.auth.dependencies import (
     CurrentIdentity,
     check_model_read_access,
     get_accessible_model_ids,
+    get_project_role,
+    has_global_access,
     require_auth,
     require_model_write,
     require_owner,
-    require_owner_or_service_account,
 )
 from yaai.server.database import get_db
 from yaai.server.models.auth import ModelAccess
+from yaai.server.models.project import DEFAULT_PROJECT_NAME, WRITE_ROLES
 from yaai.server.services.model_service import ModelService
+from yaai.server.services.project_service import ProjectService, get_or_create_default_project
 from yaai.server.services.schema_helpers import validate_record
 
 router = APIRouter(prefix="/models", tags=["models"], dependencies=[Depends(require_auth)])
@@ -41,26 +44,51 @@ async def list_models(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = None,
+    project_id: uuid.UUID | None = None,
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     model_ids = await get_accessible_model_ids(identity, db)
     svc = ModelService(db)
-    summaries, total = await svc.list_models(page, page_size, search, model_ids=model_ids)
+    summaries, total = await svc.list_models(page, page_size, search, model_ids=model_ids, project_id=project_id)
     return {
         "data": [ModelSummary(**s) for s in summaries],
         "meta": PaginationMeta(total=total, page=page, page_size=page_size),
     }
 
 
+async def _authorize_model_creation(identity: CurrentIdentity, project_id: uuid.UUID, db: AsyncSession) -> None:
+    """Allow global owners and editors/owners of the project; service accounts may also use the default project."""
+    if has_global_access(identity):
+        return
+    if await get_project_role(identity, project_id, db) in WRITE_ROLES:
+        return
+    if identity.is_service_account:
+        # Backward compatibility: service accounts without membership may create models in the default project
+        project = await ProjectService(db).get_project(project_id)
+        if project.name == DEFAULT_PROJECT_NAME:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Service account cannot create models in this project"
+        )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Editor access to the project required")
+
+
 @router.post("", status_code=201)
 async def create_model(
     data: ModelCreate,
-    identity: CurrentIdentity = Depends(require_owner_or_service_account),
+    identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
+    """Create a model in ``project_id`` (default project if omitted)."""
+    if data.project_id is None:
+        project_id = (await get_or_create_default_project(db)).id
+    else:
+        project_id = (await ProjectService(db).get_project(data.project_id)).id
+    await _authorize_model_creation(identity, project_id, db)
+
     svc = ModelService(db)
-    model = await svc.create_model(data)
+    model = await svc.create_model(data, project_id)
 
     # Auto-grant write access when a service account creates a model
     if identity.is_service_account and identity.service_account_id:
@@ -87,13 +115,21 @@ async def get_model(
 
 
 @router.put("/{model_id}")
+@router.patch("/{model_id}")
 async def update_model(
     model_id: uuid.UUID,
     data: ModelUpdate,
-    _identity: CurrentIdentity = Depends(require_model_write),
+    identity: CurrentIdentity = Depends(require_model_write),
     db: AsyncSession = Depends(get_db),
 ):
+    """Update name/description (editors) or move the model to another project via ``project_id`` (global owners)."""
     svc = ModelService(db)
+    if data.project_id is not None and not has_global_access(identity):
+        current = await svc.get_model(model_id)
+        if data.project_id != current.project_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Only owners can move models between projects"
+            )
     model = await svc.update_model(model_id, data)
     return {"data": ModelRead.model_validate(model)}
 

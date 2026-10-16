@@ -9,12 +9,14 @@ from yaai.server.models.auth import AuthProvider, User, UserRole
 from yaai.server.models.job import Notification, NotificationReadReceipt, NotificationSeverity
 from yaai.server.models.model import Model, ModelVersion
 from yaai.server.services.job_service import JobService, NotificationReader
+from yaai.server.services.project_service import get_or_create_default_project
 
 
 async def _seed(db: AsyncSession) -> tuple[User, list[Notification]]:
     created = datetime.now(UTC) - timedelta(days=1)
     user = User(username="reader", email="reader@example.com", role=UserRole.VIEWER, auth_provider=AuthProvider.LOCAL)
-    model = Model(name="m")
+    project = await get_or_create_default_project(db)
+    model = Model(name="m", project_id=project.id)
     db.add_all([user, model])
     await db.flush()
     version = ModelVersion(model_id=model.id, version="1")
