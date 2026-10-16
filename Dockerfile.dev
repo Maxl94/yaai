@@ -30,6 +30,9 @@ COPY --from=frontend-build /app/frontend/dist yaai/server/static
 RUN useradd --create-home appuser
 USER appuser
 
+# /app is not writable for appuser; the generated initial admin password is stored here (mode 0600)
+ENV BOOTSTRAP_ADMIN_PASSWORD_FILE=/home/appuser/admin-initial-password.txt
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

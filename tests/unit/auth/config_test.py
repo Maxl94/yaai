@@ -165,16 +165,29 @@ class TestValidateAuthConfig:
         assert result.jwt.secret.get_secret_value() != "changeme"
         assert "ephemeral" in caplog.text
 
-    def test_insecure_jwt_secret_generates_ephemeral_in_prod(self, caplog, monkeypatch):
+    @pytest.mark.parametrize("secret", ["", "changeme", "dev-secret-change-me", "secret"])
+    def test_missing_or_insecure_jwt_secret_raises_in_prod(self, monkeypatch, secret):
         monkeypatch.setenv("ENVIRONMENT", "production")
         config = AuthConfig(
             enabled=True,
-            jwt=JWTConfig(secret=SecretStr("changeme")),
+            jwt=JWTConfig(secret=SecretStr(secret)),
         )
-        with caplog.at_level(logging.WARNING):
-            result = validate_auth_config(config)
-        assert result.jwt.secret.get_secret_value() != "changeme"
-        assert "ephemeral" in caplog.text
+        with pytest.raises(RuntimeError, match="AUTH_JWT_SECRET must be set in production"):
+            validate_auth_config(config)
+
+    def test_strong_jwt_secret_passes_in_prod(self, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "prod")
+        config = AuthConfig(
+            enabled=True,
+            jwt=JWTConfig(secret=SecretStr("a-strong-production-secret-1234")),
+        )
+        result = validate_auth_config(config)
+        assert result.jwt.secret.get_secret_value() == "a-strong-production-secret-1234"
+
+    def test_disabled_auth_skips_jwt_secret_check_in_prod(self, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        config = AuthConfig(enabled=False, jwt=JWTConfig(secret=SecretStr("")))
+        assert validate_auth_config(config).enabled is False
 
     def test_google_oauth_no_domains_raises_in_prod(self, monkeypatch):
         monkeypatch.setenv("ENVIRONMENT", "production")

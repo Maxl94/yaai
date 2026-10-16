@@ -170,3 +170,28 @@ async def test_compare_missing_params(client: AsyncClient):
         params={"mode": "time_window", "from_a": datetime.now(UTC).isoformat()},
     )
     assert resp.status_code == 422
+
+
+async def test_compare_histograms_share_edges_and_all_bins(client: AsyncClient):
+    model_id, version_id, now = await _setup_with_two_periods(client)
+
+    resp = await client.get(
+        f"/api/v1/models/{model_id}/versions/{version_id}/dashboard/compare",
+        params={
+            "mode": "time_window",
+            "from_a": (now - timedelta(days=1)).isoformat(),
+            "to_a": now.isoformat(),
+            "from_b": (now - timedelta(days=4)).isoformat(),
+            "to_b": (now - timedelta(days=2)).isoformat(),
+        },
+    )
+    age_panel = next(p for p in resp.json()["data"]["panels"] if p["field_name"] == "age")
+    buckets_a = age_panel["data_a"]["buckets"]
+    buckets_b = age_panel["data_b"]["buckets"]
+
+    assert len(buckets_a) == 20
+    edges_a = [(b["range_start"], b["range_end"]) for b in buckets_a]
+    assert edges_a == [(b["range_start"], b["range_end"]) for b in buckets_b]
+    assert sum(b["count"] for b in buckets_a) == 10
+    assert sum(b["count"] for b in buckets_b) == 10
+    assert any(b["count"] == 0 for b in buckets_a)

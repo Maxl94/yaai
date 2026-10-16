@@ -57,7 +57,7 @@ includes a `sample_info` object:
 | `total_count` (record count) | **Exact** — full population `COUNT(*)` | Uses the `(model_version_id, timestamp)` index, no JSON read required. |
 | `min` / `max` | Sample | Most-recent N records. Getting all-time exact min/max requires a full JSON-column scan (same cost as the unsampled query), which negates the performance gain. For monitoring, recent bounds are more meaningful than historical outliers. |
 | `mean`, `std`, `median` | Sample | Statistically representative at 50k rows. |
-| Histogram bucket counts | Sample | Shape is accurate; absolute counts reflect sample size. |
+| Histogram bucket counts | Sample | Shape is accurate; absolute counts reflect sample size. Buckets are 20 equal-width bins plus up to two outlier buckets (`is_underflow` / `is_overflow` in the API) for values below p1 / above p99, so up to 22 buckets are returned. |
 | Category percentages | Sample | Ratios are unaffected by sample size. |
 
 ---
@@ -80,6 +80,27 @@ includes a `sample_info` object:
     Statistical drift tests (KS, PSI, chi-squared) produce stable results with as few as
     1 000 – 5 000 reference records.  50 000 is conservative.  Very large reference sets
     increase drift-job memory usage without meaningfully improving detection accuracy.
+
+---
+
+## Security and multi-instance operation
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENVIRONMENT` | `development` | `production` / `prod` enforces secrets and disables the API docs by default. |
+| `AUTH_JWT_SECRET` | *(none)* | JWT signing secret. **Required in production** (ephemeral secret in development). |
+| `SESSION_SECRET` | *(none)* | Session/OAuth state secret. **Required in production** (ephemeral secret in development). |
+| `BOOTSTRAP_ADMIN_PASSWORD` | *(generated)* | Initial `admin` password, min. 12 characters. |
+| `BOOTSTRAP_ADMIN_PASSWORD_FILE` | `./admin-initial-password.txt` | New file (mode `0600`, never overwritten) receiving the generated initial admin password. The password is never logged; if the file cannot be created it is printed once to stderr. |
+| `API_DOCS_ENABLED` | `true` / `false` in production | Expose `/docs`, `/redoc` and `/openapi.json`. |
+| `SECURITY_HEADERS_ENABLED` | `true` | Add CSP, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and HSTS (over HTTPS). |
+| `RATE_LIMIT_ENABLED` | `true` | Enable rate limiting. |
+| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `0` | Trusted reverse proxies in front of the server; `1` on Cloud Run accessed directly, typically `2` behind an external HTTPS load balancer. Client IP is the N-th `X-Forwarded-For` entry from the right. |
+| `RATE_LIMIT_STORAGE_URI` | `memory://` | Rate limit storage backend, e.g. `redis://host:6379` (the Redis client must be installed separately). |
+| `SCHEDULER_ENABLED` | `true` | Run the drift job scheduler in this instance. Use `false` for API-only instances/services. |
+| `SCHEDULER_SYNC_INTERVAL_SECONDS` | `60` | How often the scheduler reloads active jobs from the database, so job changes made on other instances take effect. |
+
+See [Deployment](deployment.md#running-multiple-instances) for running more than one instance.
 
 ---
 

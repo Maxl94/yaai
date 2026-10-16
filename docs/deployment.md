@@ -12,7 +12,10 @@ Before going live, make sure you've set these:
 - **`ENVIRONMENT=production`** -- the server refuses to start with default credentials in production mode
 - **`BASE_URL`** -- your public URL (e.g. `https://yaai.mycompany.com`). Used for CORS, OAuth redirects, and service account audience.
 - **`DATABASE_URL`** -- point to a managed PostgreSQL instance with strong credentials (not `changeme`)
-- **`AUTH_JWT_SECRET`** and **`SESSION_SECRET`** -- optional but recommended. If not set, the server auto-generates ephemeral secrets on startup (sessions won't survive restarts). Generate with `openssl rand -base64 32`.
+- **`AUTH_JWT_SECRET`** and **`SESSION_SECRET`** -- **required** in production; the server refuses to start without them (a missing secret would silently log users out on every restart and break multiple instances). Generate with `openssl rand -base64 32`.
+- **`BOOTSTRAP_ADMIN_PASSWORD`** -- recommended for the first start (min. 12 characters); **effectively required on Cloud Run**, where you cannot read files inside an instance. Otherwise a password is generated and written to a new `0600` file (`BOOTSTRAP_ADMIN_PASSWORD_FILE`, never overwritten) and never to the log. Only if that file cannot be created is the password printed once to stderr, which in containers usually means the log stream -- avoid this by setting the variable or pointing the file to a writable path. The admin account is only created after the password has been delivered.
+- **`RATE_LIMIT_TRUSTED_PROXY_HOPS`** -- set to the number of reverse proxies in front of YAAI, otherwise all users share one rate-limit bucket: `1` when Cloud Run is accessed directly, typically `2` behind an external HTTPS load balancer (which sends `X-Forwarded-For: <client>, <load-balancer-ip>`). Check the header your deployment actually receives.
+- **API docs** -- `/docs`, `/redoc` and `/openapi.json` are disabled in production. Set `API_DOCS_ENABLED=true` to expose them.
 
 ## Docker Compose
 
@@ -39,7 +42,7 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 === "Local auth (default)"
 
-    Username + password login with API key auth for service accounts. An admin account is created automatically on first startup -- check the server logs for the generated password.
+    Username + password login with API key auth for service accounts. An admin account is created automatically on first startup. Set `BOOTSTRAP_ADMIN_PASSWORD` or read the generated password from `admin-initial-password.txt` in the container working directory (never logged).
 
     ```yaml
     services:
@@ -76,8 +79,9 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
           DATABASE_URL: postgresql+asyncpg://aimon:change-me-in-production@db:5432/aimonitoring
           ENVIRONMENT: production
           AUTH_ENABLED: "true"
-          # AUTH_JWT_SECRET: <generate with: openssl rand -base64 32>
-          # SESSION_SECRET: <generate with: openssl rand -base64 32>
+          AUTH_JWT_SECRET: <generate with: openssl rand -base64 32>
+          SESSION_SECRET: <generate with: openssl rand -base64 32>
+          BOOTSTRAP_ADMIN_PASSWORD: <at least 12 characters>
         depends_on:
           db:
             condition: service_healthy
@@ -130,8 +134,8 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
           DATABASE_URL: postgresql+asyncpg://aimon:change-me-in-production@db:5432/aimonitoring
           ENVIRONMENT: production
           AUTH_ENABLED: "true"
-          # AUTH_JWT_SECRET: <generate with: openssl rand -base64 32>
-          # SESSION_SECRET: <generate with: openssl rand -base64 32>
+          AUTH_JWT_SECRET: <generate with: openssl rand -base64 32>
+          SESSION_SECRET: <generate with: openssl rand -base64 32>
 
           # Google OAuth
           AUTH_OAUTH_GOOGLE_ENABLED: "true"
@@ -188,6 +192,8 @@ export BASE_URL=https://yaai.mycompany.com
 export DATABASE_URL=postgresql+asyncpg://user:password@your-db-host:5432/aimonitoring
 export ENVIRONMENT=production
 export AUTH_ENABLED=true
+export AUTH_JWT_SECRET=$(openssl rand -base64 32)
+export SESSION_SECRET=$(openssl rand -base64 32)
 ```
 
 Apply database migrations (on first install and after every upgrade), then start the server:
@@ -296,10 +302,43 @@ async with YaaiClient("https://yaai.mycompany.com/api/v1") as client:
 > [!TIP]
 > SDK clients using Google SA auth need the `gcp` extra: `pip install "yaai-monitoring[gcp]"`. Clients using API keys only need the base package.
 
+## Security
+
+- **Security headers** -- every response carries a Content-Security-Policy (`script-src 'self'`, no framing, no plugins), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`; `Strict-Transport-Security` is added when `BASE_URL` is `https://` or the request arrives over HTTPS. Disable with `SECURITY_HEADERS_ENABLED=false` only if your reverse proxy sets equivalent headers. When `/docs` is enabled it gets a relaxed CSP that allows `cdn.jsdelivr.net`.
+- **Rate limiting** -- keyed by client IP. Behind a proxy set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (see below); YAAI then uses the N-th entry from the right of `X-Forwarded-For`, ignoring client-supplied entries on the left.
+- **Residual risk: tokens in `localStorage`** -- the web UI stores access and refresh tokens in the browser's `localStorage`, so a successful XSS could read them. The strict CSP (no inline or third-party scripts) is the mitigation; moving tokens to `httpOnly` cookies is not implemented. Keep dependencies updated and do not add third-party scripts to the frontend.
+
+## Running multiple instances
+
+YAAI is designed as a single instance, but can run several (for example Cloud Run with `max-instances > 1`) if you take care of the following:
+
+| Concern | Behavior | What to do |
+|---|---|---|
+| `AUTH_JWT_SECRET`, `SESSION_SECRET` | Required in production; tokens and OAuth state signed by one instance must validate on all others | Use the **same** values on every instance (Secret Manager) |
+| Rate limiting | Counters live in memory per instance, so the effective limit is multiplied by the instance count | Set `RATE_LIMIT_STORAGE_URI=redis://host:6379` (install the Redis client, e.g. `pip install redis`; it is not a YAAI dependency) |
+| Client IP | Behind a proxy every user may share its IP | Set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (`1` on Cloud Run accessed directly, typically `2` behind an external HTTPS load balancer) |
+| OAuth code store and token caches | Kept in memory per instance | Use session affinity, or run a single instance |
+| Scheduled drift jobs | Every instance with `SCHEDULER_ENABLED=true` runs its own in-memory scheduler, so each cron job fires on every such instance | A PostgreSQL advisory lock makes an overlapping execution on another instance skip. Every scheduler re-reads the active jobs from the database every `SCHEDULER_SYNC_INTERVAL_SECONDS` (default `60`), so creating, rescheduling, pausing or deleting a job on any instance reaches all schedulers within that interval |
+
+The advisory lock only prevents jobs from running **concurrently**; if one instance finishes before another instance's trigger fires, the job can still run twice. The lock is skipped on non-PostgreSQL databases. A job needs one database connection for its whole run (the lock is held on the connection that runs the job).
+
+Job changes made through the API are applied immediately on the instance that served the request and on all other schedulers at the next reconciliation (at most `SCHEDULER_SYNC_INTERVAL_SECONDS` later). Reconciliation only runs where `SCHEDULER_ENABLED=true`.
+
+Two supported layouts:
+
+- **Scheduler on every instance** (simplest): keep `SCHEDULER_ENABLED=true` everywhere. The advisory lock prevents overlapping runs and reconciliation keeps all schedules in sync.
+- **Dedicated scheduler service**: deploy the same image twice, the API service with `SCHEDULER_ENABLED=false` and a scheduler service with `SCHEDULER_ENABLED=true` and a single instance. On Cloud Run all instances of a service share the same environment variables, so "disabled on all but one instance" is only possible with two services.
+
+> [!IMPORTANT]
+> **Cloud Run:** the scheduler runs inside the server process and needs CPU outside of requests. Use **"CPU always allocated"** (`--no-cpu-throttling`) and a minimum of one instance (`--min-instances=1`) for every service that runs the scheduler.
+
 ## Troubleshooting
 
 **Server refuses to start in production mode**
 : You're running with `ENVIRONMENT=production` but haven't changed the default `changeme` password in `DATABASE_URL`. Use strong credentials.
+
+**Server refuses to start: "AUTH_JWT_SECRET must be set in production" / "SESSION_SECRET must be set in production"**
+: Set both secrets (`openssl rand -base64 32`) or run with `ENVIRONMENT=development`.
 
 **"Database schema is not up to date" on startup**
 : The server does not apply migrations automatically. Run `python -m yaai.server.migrate` (Docker Compose: make sure the `migrate` service is defined and completed; Cloud Run: execute the migration job) and start the server again.

@@ -16,13 +16,20 @@ from yaai.server.schemas.dashboard import (
     CategoricalStatistics,
     CategoryCount,
     DashboardPanel,
-    HistogramBucket,
     HistogramData,
     LatestDrift,
     NumericalStatistics,
     SampleInfo,
 )
 from yaai.server.services.base import BaseService
+from yaai.server.services.histogram import (
+    LOWER_PERCENTILE,
+    TAIL_FACTOR,
+    UPPER_PERCENTILE,
+    BinSpec,
+    buckets_from_counts,
+    build_histogram,
+)
 
 _NUM_BUCKETS = 20
 
@@ -150,6 +157,9 @@ class DashboardService(BaseService):
         ``exact_total`` is the full record count from a cheap index-only COUNT(*) and
         is surfaced in ``sample_info`` so the UI can show an info indicator.
 
+        Histogram bins are equal-width and empty bins are included. Long tails beyond p1 / p99 are
+        collected in underflow / overflow buckets (see ``services.histogram``).
+
         Note: min/max reflect the sample window (most recent N records), not the
         all-time extremes.  This is intentional — for monitoring, current distribution
         bounds are more meaningful than historical outliers.  Getting exact all-time
@@ -160,6 +170,10 @@ class DashboardService(BaseService):
         where, params = self._build_time_where(model_version_id, from_ts, to_ts)
         params["field_name"] = field.field_name
         params["num_buckets"] = _NUM_BUCKETS
+        params["overflow_bucket"] = _NUM_BUCKETS + 1
+        params["lower_q"] = LOWER_PERCENTILE / 100
+        params["upper_q"] = UPPER_PERCENTILE / 100
+        params["tail_factor"] = TAIL_FACTOR
         params["max_samples"] = max_samples
 
         sql = text(
@@ -171,9 +185,21 @@ class DashboardService(BaseService):
                 ORDER BY timestamp DESC
                 LIMIT :max_samples
             ),
-            data AS (
-                SELECT CAST(json_extract_path_text({col}, :field_name) AS DOUBLE PRECISION) AS val
+            parsed AS (
+                SELECT CAST(json_extract_path_text({col}, :field_name) AS DOUBLE PRECISION) AS raw_val
                 FROM sampled
+            ),
+            data AS (
+                -- NaN / +-Infinity (accepted by the cast from JSON strings) count as NULL, like in the Python path
+                SELECT CASE
+                    WHEN raw_val IN (
+                        CAST('NaN' AS DOUBLE PRECISION),
+                        CAST('Infinity' AS DOUBLE PRECISION),
+                        CAST('-Infinity' AS DOUBLE PRECISION)
+                    ) THEN NULL
+                    ELSE raw_val
+                END AS val
+                FROM parsed
             ),
             agg AS (
                 SELECT
@@ -182,33 +208,44 @@ class DashboardService(BaseService):
                     min(val)                                          AS sample_min,
                     max(val)                                          AS sample_max,
                     percentile_cont(0.5) WITHIN GROUP (ORDER BY val) AS median,
+                    percentile_cont(ARRAY[CAST(:lower_q AS double precision), CAST(:upper_q AS double precision)])
+                        WITHIN GROUP (ORDER BY val) AS pcts,
                     count(val)                                        AS sample_non_null,
                     count(*)                                          AS sample_total
                 FROM data
             ),
+            bounds AS (
+                SELECT
+                    agg.*,
+                    CASE WHEN pcts[1] < pcts[2] AND pcts[1] - sample_min > :tail_factor * (pcts[2] - pcts[1])
+                         THEN pcts[1] ELSE sample_min END AS lo,
+                    CASE WHEN pcts[1] < pcts[2] AND sample_max - pcts[2] > :tail_factor * (pcts[2] - pcts[1])
+                         THEN pcts[2] ELSE sample_max END AS hi
+                FROM agg
+            ),
             hist AS (
                 SELECT
-                    width_bucket(
-                        d.val,
-                        a.sample_min,
-                        a.sample_min + (a.sample_max - a.sample_min) * 1.000001,
-                        :num_buckets
-                    ) AS bucket,
+                    CASE
+                        WHEN d.val < b.lo THEN 0
+                        WHEN d.val > b.hi THEN CAST(:overflow_bucket AS integer)
+                        ELSE LEAST(width_bucket(d.val, b.lo, b.hi, :num_buckets), :num_buckets)
+                    END AS bucket,
                     count(*) AS cnt
                 FROM data d
-                CROSS JOIN agg a
+                CROSS JOIN bounds b
                 WHERE d.val IS NOT NULL
-                  AND a.sample_min IS NOT NULL
-                  AND a.sample_min < a.sample_max
-                GROUP BY bucket
+                  AND b.lo IS NOT NULL
+                  AND b.lo < b.hi
+                GROUP BY 1
             )
             SELECT
-                a.mean, a.std, a.sample_min, a.sample_max, a.median,
-                a.sample_non_null, a.sample_total,
-                h.bucket, h.cnt
-            FROM agg a
-            LEFT JOIN hist h ON true
-            ORDER BY h.bucket
+                b.mean, b.std, b.sample_min, b.sample_max, b.median, b.lo, b.hi,
+                b.sample_non_null, b.sample_total,
+                s.bucket, coalesce(h.cnt, 0) AS cnt
+            FROM bounds b
+            CROSS JOIN generate_series(0, CAST(:overflow_bucket AS integer)) AS s(bucket)
+            LEFT JOIN hist h ON h.bucket = s.bucket
+            ORDER BY s.bucket
         """
         )
 
@@ -250,22 +287,17 @@ class DashboardService(BaseService):
             null_count=null_count,
         )
 
-        bucket_rows = [r for r in rows if r.bucket is not None]
-        if not bucket_rows:
-            buckets: list[HistogramBucket] = [
-                HistogramBucket(range_start=stats.min, range_end=stats.max, count=sample_non_null)
-            ]
+        spec = BinSpec.create(float(r0.lo), float(r0.hi), _NUM_BUCKETS, min_v, max_v)
+        if spec.num_bins == 1:
+            counts = (0, [sample_non_null], 0)
         else:
-            s_min, s_max = float(r0.sample_min), float(r0.sample_max)
-            width = (s_max - s_min) / _NUM_BUCKETS
-            buckets = [
-                HistogramBucket(
-                    range_start=round(s_min + (int(r.bucket) - 1) * width, 4),
-                    range_end=round(s_min + int(r.bucket) * width, 4),
-                    count=int(r.cnt),
-                )
-                for r in bucket_rows
-            ]
+            by_bucket = {int(r.bucket): int(r.cnt) for r in rows}
+            counts = (
+                by_bucket[0],
+                [by_bucket[i] for i in range(1, _NUM_BUCKETS + 1)],
+                by_bucket[_NUM_BUCKETS + 1],
+            )
+        buckets = buckets_from_counts(spec, *counts)
 
         return DashboardPanel(
             field_name=field.field_name,
@@ -395,17 +427,7 @@ class DashboardService(BaseService):
             )
 
         arr = np.array(numeric_values, dtype=float)
-        num_buckets = min(_NUM_BUCKETS, len(numeric_values))
-        min_val, max_val = float(arr.min()), float(arr.max())
-
-        if min_val == max_val:
-            buckets: list[HistogramBucket] = [
-                HistogramBucket(range_start=min_val, range_end=max_val, count=len(numeric_values))
-            ]
-        else:
-            edges = np.linspace(min_val, max_val, num_buckets + 1)
-            counts = np.histogram(arr, bins=edges)[0]
-            buckets = self.build_histogram_buckets(edges, counts)
+        buckets = build_histogram(arr, _NUM_BUCKETS)
 
         stats = self.compute_numerical_statistics(arr, numeric_values, null_count)
 

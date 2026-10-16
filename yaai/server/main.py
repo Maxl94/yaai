@@ -2,7 +2,6 @@ import asyncio
 import importlib.metadata
 import logging
 import os
-import secrets as _secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,18 +15,27 @@ from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
 
 from yaai.server import database
+from yaai.server.admin_bootstrap import deliver_generated_password, resolve_admin_password
 from yaai.server.auth.config import load_auth_config, validate_auth_config
 from yaai.server.auth.dependencies import set_auth_config
 from yaai.server.auth.oauth import setup_oauth
 from yaai.server.auth.passwords import hash_password
-from yaai.server.config import settings
+from yaai.server.config import api_docs_enabled, resolve_session_secret, settings
 from yaai.server.migrate import SchemaNotUpToDateError, check_schema_up_to_date
 from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models import project as _project_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, User, UserRole
 from yaai.server.rate_limit import limiter
 from yaai.server.routers import auth, dashboard, inferences, jobs, models, projects, schema
-from yaai.server.scheduler import load_active_jobs, scheduler
+from yaai.server.scheduler import (
+    load_active_jobs,
+    scheduler,
+    scheduler_enabled,
+    scheduler_sync_interval_seconds,
+    start_job_sync,
+)
+from yaai.server.security_headers import SecurityHeadersMiddleware, security_headers_enabled
+from yaai.server.spa import resolve_static_file
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -41,28 +49,33 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 async def _bootstrap_admin() -> None:
     """Create a default admin user if the users table is empty.
 
-    Generates a random password and logs it once. The admin should change
-    it immediately after first login.
+    Uses BOOTSTRAP_ADMIN_PASSWORD if set, otherwise generates a random password and
+    stores it in a new 0600 file (never logged; stderr only as a one-time fallback).
+    The admin should change it after first login.
     """
     async with database.async_session() as db:
         result = await db.execute(select(User).limit(1))
         if result.scalars().first() is not None:
             return
 
-        password = _secrets.token_urlsafe(16)
+        # Deliver the password before creating the user so a failure never leaves an admin with an unknown password
+        password, generated = resolve_admin_password()
         admin = User(
             username="admin",
             hashed_password=hash_password(password),
             role=UserRole.OWNER,
             auth_provider=AuthProvider.LOCAL,
         )
+        password_file = deliver_generated_password(password) if generated else None
         db.add(admin)
-        await db.commit()
-        logger.info(
-            "Created default admin account — username: admin, password: %s  "
-            "(change this immediately after first login)",
-            password,
-        )
+        try:
+            await db.commit()
+        except Exception:
+            if password_file is not None:
+                password_file.unlink(missing_ok=True)
+            raise
+        if not generated:
+            logger.info("Created default admin account (username: admin) with BOOTSTRAP_ADMIN_PASSWORD.")
 
 
 @asynccontextmanager
@@ -108,22 +121,31 @@ async def lifespan(app: FastAPI):
     if auth_config.enabled and auth_config.local_enabled:
         await _bootstrap_admin()
 
-    # Start job scheduler
-    logger.info("Loading active jobs ...")
-    async with database.async_session() as db:
-        await load_active_jobs(db)
-    scheduler.start()
+    # Start job scheduler (SCHEDULER_ENABLED=false for API-only instances)
+    if scheduler_enabled():
+        logger.info("Loading active jobs ...")
+        async with database.async_session() as db:
+            await load_active_jobs(db)
+        start_job_sync(scheduler_sync_interval_seconds())
+        scheduler.start()
+    else:
+        logger.info("SCHEDULER_ENABLED is false — scheduled jobs will not run on this instance.")
     logger.info("Startup complete.")
 
     yield
 
-    scheduler.shutdown(wait=False)
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
 
     if cloud_sql:
         await cloud_sql.shutdown()
 
 
+_docs_enabled = api_docs_enabled()
 app = FastAPI(
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
     title="YAAI Monitoring",
     description="Yet Another AI Monitoring — schema-driven ML model monitoring platform",
     version=importlib.metadata.version("yaai-monitoring"),
@@ -149,14 +171,12 @@ app.add_middleware(
 )
 
 # Session middleware required for OAuth state (authlib uses it)
-_session_secret = os.environ.get("SESSION_SECRET")
-if not _session_secret or _session_secret == "dev-session-secret-change-me":  # noqa: S105
-    _session_secret = _secrets.token_urlsafe(32)
-    logger.warning(
-        "SESSION_SECRET not configured — generated ephemeral secret. "
-        "OAuth state will NOT survive restarts. Set SESSION_SECRET for persistence."
-    )
+_session_secret = resolve_session_secret()
 app.add_middleware(SessionMiddleware, secret_key=_session_secret)
+
+# Added last so it wraps every other middleware and response
+if security_headers_enabled():
+    app.add_middleware(SecurityHeadersMiddleware, base_url=settings.base_url, docs_enabled=_docs_enabled)
 
 # Routers
 API_PREFIX = "/api/v1"
@@ -180,10 +200,5 @@ if STATIC_DIR.is_dir():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # Prevent path traversal attacks
-        file_path = (STATIC_DIR / full_path).resolve()
-        if not str(file_path).startswith(str(STATIC_DIR.resolve())):
-            return FileResponse(STATIC_DIR / "index.html")
-        if file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(STATIC_DIR / "index.html")
+        file_path = resolve_static_file(STATIC_DIR, full_path)
+        return FileResponse(file_path or STATIC_DIR / "index.html")

@@ -25,6 +25,7 @@ env/
 .env.local
 .env.*.local
 auth.yaml
+admin-initial-password.txt
 
 # OS
 .DS_Store

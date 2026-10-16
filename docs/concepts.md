@@ -131,7 +131,7 @@ This is useful for investigating shifts you've been alerted about or for ad-hoc 
 
 There's no dashboard builder. When you navigate to a model version in the UI, YAAI queries inference data for every schema field and renders:
 
-- **Histograms** for numerical fields, with mean, median, std, min, max
+- **Histograms** for numerical fields, with mean, median, std, min, max. Histograms always use 20 equal-width bins, including empty ones, so the x-axis is linear. If a tail reaches far beyond the 1st/99th percentile, the bins stop at that percentile and the outliers are collected in a separate `<p1` / `>p99` bar (dashed in the chart), so a few extreme values don't squash the rest of the distribution. Non-finite values (NaN, Infinity) are ignored.
 - **Bar charts** for categorical fields, sorted by frequency
 - **Drift badges** showing the latest score per field
 
@@ -143,7 +143,7 @@ The time range is adjustable. Tabs filter by input vs. output fields.
 
 YAAI supports four auth methods:
 
-- **Local accounts** -- username + password, enabled by default. An admin account is created on first startup with a randomly generated password (check the server logs). Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
+- **Local accounts** -- username + password, enabled by default. An admin account is created on first startup with a randomly generated password (written to a 0600 file, never logged -- see [Server Setup](server-setup.md#default-admin-account)). Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
 - **Google OAuth** -- for human users via browser. Disabled by default. When enabled, local auth is automatically disabled.
 - **API keys** -- for service accounts and SDK clients (`X-API-Key: yaam_...`). Enabled by default. Keys are scoped per-model and/or per-project.
 - **Google service accounts** -- for GCP workloads using Application Default Credentials and ID token verification.
