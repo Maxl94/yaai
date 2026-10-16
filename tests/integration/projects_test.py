@@ -517,3 +517,191 @@ async def test_sa_model_access_still_works_across_projects(team: Team, pg_sessio
         assert (await sa_client.get(f"{API}/models/{model['id']}")).status_code == 200
         assert (await sa_client.put(f"{API}/models/{model['id']}", json={"description": "x"})).status_code == 200
         assert [m["name"] for m in (await sa_client.get(f"{API}/models")).json()["data"]] == ["acl-model"]
+
+
+# Hardening: SA access grants, reserved name, owner rules, cascades
+
+
+async def _membership_id(client: AsyncClient, project_id: str, name: str) -> str:
+    members = (await client.get(f"{API}/projects/{project_id}/members")).json()["data"]
+    return next(m["id"] for m in members if m["name"] == name)
+
+
+async def test_sa_created_model_in_member_project_is_revoked_with_membership(
+    team: Team, pg_session_factory: async_sessionmaker
+):
+    sa_id, raw_key = await _create_sa(team.owner_client, "revocable-sa")
+    await _add_member(team.owner_client, team.project_a["id"], "editor", service_account_id=sa_id)
+    async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
+        created = await _create_model(sa_client, "sa-made", team.project_a["id"])
+        assert created.status_code == 201
+        model_id = created.json()["data"]["id"]
+        assert (await sa_client.get(f"{API}/models/{model_id}")).status_code == 200
+
+        access = await team.owner_client.get(f"{API}/auth/models/{model_id}/access")
+        assert access.json()["data"] == []  # membership grants access, no ModelAccess entry is created
+
+        membership_id = await _membership_id(team.owner_client, team.project_a["id"], "revocable-sa")
+        removed = await team.owner_client.delete(f"{API}/projects/{team.project_a['id']}/members/{membership_id}")
+        assert removed.status_code == 204
+
+        assert (await sa_client.get(f"{API}/models/{model_id}")).status_code == 403
+        assert (await sa_client.put(f"{API}/models/{model_id}", json={"description": "x"})).status_code == 403
+
+
+async def test_sa_default_project_fallback_creates_model_access_entry(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    sa_id, raw_key = await _create_sa(owner_client, "fallback-sa")
+    async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
+        model_id = (await _create_model(sa_client, "fallback-model")).json()["data"]["id"]
+        assert (await sa_client.put(f"{API}/models/{model_id}", json={"description": "x"})).status_code == 200
+
+    access = (await owner_client.get(f"{API}/auth/models/{model_id}/access")).json()["data"]
+    assert [entry["service_account_id"] for entry in access] == [sa_id]
+
+
+async def test_sa_viewer_of_default_project_can_still_create_there_via_fallback(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    await _create_model(owner_client, "seeds-default-project")
+    default_id = await _default_project_id(owner_client)
+    sa_id, raw_key = await _create_sa(owner_client, "default-viewer-sa")
+    await _add_member(owner_client, default_id, "viewer", service_account_id=sa_id)
+
+    async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
+        created = await _create_model(sa_client, "viewer-sa-default-model")
+        assert created.status_code == 201
+        model_id = created.json()["data"]["id"]
+        assert (await sa_client.put(f"{API}/models/{model_id}", json={"description": "x"})).status_code == 200
+        other = await _model_in_project(owner_client, "someone-elses", default_id)
+        assert (await sa_client.get(f"{API}/models/{other['id']}")).status_code == 200  # viewer membership
+        assert (await sa_client.put(f"{API}/models/{other['id']}", json={"description": "x"})).status_code == 403
+
+
+async def test_default_project_name_is_reserved(team: Team):
+    owner = team.owner_client
+    assert (await owner.post(f"{API}/projects", json={"name": "default"})).status_code == 409
+    renamed = await team.clients["a-owner"].patch(f"{API}/projects/{team.project_a['id']}", json={"name": "default"})
+    assert renamed.status_code == 409
+    assert (await owner.patch(f"{API}/projects/{team.project_b['id']}", json={"name": "default"})).status_code == 409
+
+    await _create_model(owner, "creates-default-project")
+    default_id = await _default_project_id(owner)
+    same_name = await owner.patch(f"{API}/projects/{default_id}", json={"name": "default", "description": "d"})
+    assert same_name.status_code == 200  # the default project itself may keep its name
+
+
+async def test_service_accounts_cannot_be_project_owners(team: Team):
+    sa_id, _ = await _create_sa(team.owner_client, "owner-candidate-sa")
+    base = f"{API}/projects/{team.project_a['id']}/members"
+    for client in (team.owner_client, team.clients["a-owner"]):
+        resp = await client.post(base, json={"role": "owner", "service_account_id": sa_id})
+        assert resp.status_code == 422
+        assert "Service accounts cannot be project owners" in resp.text
+
+    member = await _add_member(team.owner_client, team.project_a["id"], "editor", service_account_id=sa_id)
+    promoted = await team.clients["a-owner"].patch(f"{base}/{member['id']}", json={"role": "owner"})
+    assert promoted.status_code == 422
+    assert "Service accounts cannot be project owners" in promoted.text
+    assert (await team.owner_client.patch(f"{base}/{member['id']}", json={"role": "owner"})).status_code == 422
+
+
+async def test_last_project_owner_cannot_leave_unless_global_owner(team: Team):
+    base = f"{API}/projects/{team.project_a['id']}/members"
+    owner_client = team.clients["a-owner"]
+    own_membership = await _membership_id(team.owner_client, team.project_a["id"], "a-owner")
+
+    assert (await owner_client.delete(f"{base}/{own_membership}")).status_code == 409
+    assert (await owner_client.patch(f"{base}/{own_membership}", json={"role": "editor"})).status_code == 409
+    assert (await owner_client.patch(f"{base}/{own_membership}", json={"role": "owner"})).status_code == 200
+
+    second = await _add_member(owner_client, team.project_a["id"], "owner", user_id=str(team.users["outsider"].id))
+    assert (await owner_client.patch(f"{base}/{own_membership}", json={"role": "editor"})).status_code == 200
+    # a-owner is an editor now; the remaining owner is the former outsider
+    assert (await team.clients["outsider"].delete(f"{base}/{second['id']}")).status_code == 409
+
+    assert (await team.owner_client.delete(f"{base}/{second['id']}")).status_code == 204  # global owners may
+    assert (await team.clients["a-editor"].get(base)).status_code == 403
+
+
+async def test_deleting_user_or_service_account_removes_memberships(team: Team):
+    sa_id, _ = await _create_sa(team.owner_client, "cascade-sa")
+    await _add_member(team.owner_client, team.project_a["id"], "viewer", service_account_id=sa_id)
+    base = f"{API}/projects/{team.project_a['id']}/members"
+    before = {m["name"] for m in (await team.owner_client.get(base)).json()["data"]}
+    assert {"a-viewer", "cascade-sa"} <= before
+
+    assert (await team.owner_client.delete(f"{API}/auth/users/{team.users['a-viewer'].id}")).status_code == 204
+    assert (await team.owner_client.delete(f"{API}/auth/service-accounts/{sa_id}")).status_code == 204
+
+    after = {m["name"] for m in (await team.owner_client.get(base)).json()["data"]}
+    assert after == before - {"a-viewer", "cascade-sa"}
+
+
+class WriteCases:
+    """Write requests against one model version; the order matters (triggering a job locks the schema)."""
+
+    def __init__(self, owner: AsyncClient, model_id: str, version_id: str, job_id: str):
+        self.owner = owner
+        self.version_id = version_id
+        self.job_id = job_id
+        self.schema_calls = 0
+        self.version_url = f"{API}/models/{model_id}/versions/{version_id}"
+        self.requests = {
+            "reference-data": self.reference_data,
+            "ground-truth": self.ground_truth,
+            "version-patch": self.version_patch,
+            "threshold-patch": self.threshold_patch,
+            "schema-overwrite": self.schema_overwrite,
+            "job-patch": self.job_patch,
+            "job-trigger": self.job_trigger,
+        }
+
+    async def reference_data(self, client: AsyncClient):
+        records = [{"inputs": {"age": 20 + i}, "outputs": {"score": 0.5}} for i in range(5)]
+        return await client.post(f"{self.version_url}/reference-data", json={"records": records})
+
+    async def ground_truth(self, client: AsyncClient):
+        payload = {"model_version_id": self.version_id, "inputs": {"age": 1}, "outputs": {"score": 0.1}}
+        inference_id = (await self.owner.post(f"{API}/inferences", json=payload)).json()["data"]["id"]
+        return await client.post(f"{API}/ground-truth", json={"inference_id": inference_id, "label": {"score": 1}})
+
+    async def version_patch(self, client: AsyncClient):
+        return await client.patch(self.version_url, json={"description": "patched"})
+
+    async def threshold_patch(self, client: AsyncClient):
+        fields = (await self.owner.get(self.version_url)).json()["data"]["schema_fields"]
+        field_id = next(f["id"] for f in fields if f["direction"] == "input")
+        return await client.patch(f"{self.version_url}/fields/{field_id}/threshold", json={"alert_threshold": 0.3})
+
+    async def schema_overwrite(self, client: AsyncClient):
+        # Fresh field names per call: re-using existing names collides with the unique constraint
+        self.schema_calls += 1
+        schema = [
+            {"direction": "input", "field_name": f"income{self.schema_calls}", "data_type": "numerical"},
+            {"direction": "output", "field_name": f"risk{self.schema_calls}", "data_type": "numerical"},
+        ]
+        return await client.put(f"{self.version_url}/schema", json=schema)
+
+    async def job_patch(self, client: AsyncClient):
+        return await client.patch(f"{API}/jobs/{self.job_id}", json={"name": "renamed-job"})
+
+    async def job_trigger(self, client: AsyncClient):
+        return await client.post(f"{API}/jobs/{self.job_id}/trigger")
+
+
+async def test_write_endpoint_matrix_per_project_role(team: Team):
+    model = await _model_in_project(team.owner_client, "matrix-model", team.project_a["id"])
+    version = await _create_version(team.owner_client, model["id"])
+    jobs = (await team.owner_client.get(f"{API}/models/{model['id']}/versions/{version['id']}/jobs")).json()["data"]
+    cases = WriteCases(team.owner_client, model["id"], version["id"], jobs[0]["id"])
+
+    for endpoint, request in cases.requests.items():
+        for name in ("a-viewer", "outsider"):
+            resp = await request(team.clients[name])
+            assert resp.status_code == 403, f"{endpoint} as {name}: {resp.status_code} {resp.text}"
+    for endpoint, request in cases.requests.items():
+        for name in ("a-editor", "a-owner"):
+            resp = await request(team.clients[name])
+            assert 200 <= resp.status_code < 300, f"{endpoint} as {name}: {resp.status_code} {resp.text}"
