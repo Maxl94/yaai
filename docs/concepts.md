@@ -29,7 +29,9 @@ Access combines the **global role** of a user with their **project role**:
 
 A global **viewer** is a regular user whose access comes entirely from project memberships. New users -- including users that are auto-created on their first Google login -- see no models until a project owner or global owner adds them to a project.
 
-Service accounts keep their per-model access (`model_access`) and can additionally be added to a project with a role. They may read/write a model if either grants it. Service accounts without a membership may still create models in the `default` project (and are granted access to them), so existing SDK scripts keep working.
+Service accounts keep their per-model access (`model_access`) and can additionally be added to a project with a role. They may read/write a model if either grants it. Service accounts without a membership may still create models in the `default` project and are granted per-model access to them, so existing SDK scripts keep working. When a service account creates a model through a project membership (editor), no per-model grant is added, so removing the membership removes the access. Service accounts can be project editors or viewers but not project owners.
+
+The project name `default` is reserved. A project owner cannot remove or demote the last owner of a project (409); global owners can.
 
 Memberships are always checked against the database, so changes take effect immediately.
 

@@ -31,6 +31,8 @@ class ProjectMemberCreate(BaseModel):
     def _exactly_one_principal(self) -> Self:
         if sum(value is not None for value in (self.user_id, self.username, self.service_account_id)) != 1:
             raise ValueError("Exactly one of user_id, username or service_account_id is required")
+        if self.service_account_id is not None and self.role == ProjectRole.OWNER:
+            raise ValueError("Service accounts cannot be project owners; use the editor role")
         return self
 
 

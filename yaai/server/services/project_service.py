@@ -19,6 +19,9 @@ from yaai.server.schemas.project import (
 
 logger = logging.getLogger(__name__)
 
+RESERVED_NAME_DETAIL = f"The project name '{DEFAULT_PROJECT_NAME}' is reserved for the default project"
+SA_OWNER_DETAIL = "Service accounts cannot be project owners; use the editor role"
+
 
 async def get_or_create_default_project(db: AsyncSession) -> Project:
     """Return the "default" project, creating it if it does not exist yet.
@@ -90,18 +93,22 @@ class ProjectService:
         return list((await self.db.execute(query)).scalars().all())
 
     async def create_project(self, data: ProjectCreate) -> Project:
-        """Create a project, raising 409 if the name is taken."""
+        """Create a project, raising 409 if the name is taken or reserved for the default project."""
+        if data.name == DEFAULT_PROJECT_NAME:
+            raise HTTPException(status_code=409, detail=RESERVED_NAME_DETAIL)
         project = Project(name=data.name, description=data.description)
         self.db.add(project)
         await self._commit_unique(project, "Project with this name already exists")
         return project
 
     async def update_project(self, project_id: uuid.UUID, data: ProjectUpdate) -> Project:
-        """Partially update name and/or description. The default project cannot be renamed."""
+        """Partially update name and/or description. The default project cannot be renamed or taken over."""
         project = await self.get_project(project_id)
         if data.name is not None and data.name != project.name:
             if project.name == DEFAULT_PROJECT_NAME:
                 raise HTTPException(status_code=409, detail="The default project cannot be renamed")
+            if data.name == DEFAULT_PROJECT_NAME:
+                raise HTTPException(status_code=409, detail=RESERVED_NAME_DETAIL)
             project.name = data.name
         if data.description is not None:
             project.description = data.description
@@ -126,7 +133,13 @@ class ProjectService:
                 detail=f"Project still contains {model_count} model(s); move or delete them first",
             )
         await self.db.delete(project)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()  # a model was added concurrently (RESTRICT foreign key)
+            raise HTTPException(
+                status_code=409, detail="Project still contains models; move or delete them first"
+            ) from None
 
     async def list_members(self, project_id: uuid.UUID) -> list[ProjectMemberRead]:
         """List the members (users and service accounts) of a project."""
@@ -165,19 +178,60 @@ class ProjectService:
         return self._member_read(membership, user, sa)
 
     async def update_member_role(
-        self, project_id: uuid.UUID, membership_id: uuid.UUID, role: ProjectRole
+        self, project_id: uuid.UUID, membership_id: uuid.UUID, role: ProjectRole, *, guard_last_owner: bool = False
     ) -> ProjectMemberRead:
-        """Change a member's role, raising 404 if the membership is not part of the project."""
+        """Change a member's role.
+
+        Args:
+            project_id: Project the membership must belong to.
+            membership_id: Membership to change.
+            role: New role.
+            guard_last_owner: Reject demoting the last project owner (set for callers that are not global owners).
+
+        Raises:
+            HTTPException: 404 if the membership is not part of the project, 422 for an owner service account,
+                409 if the last owner would be demoted.
+        """
         membership = await self._get_membership(project_id, membership_id)
+        if role == ProjectRole.OWNER and membership.service_account_id is not None:
+            raise HTTPException(status_code=422, detail=SA_OWNER_DETAIL)
+        if guard_last_owner and role != ProjectRole.OWNER:
+            await self._ensure_not_last_owner(membership)
         membership.role = role
         await self.db.commit()
         return await self._read_member(membership)
 
-    async def remove_member(self, project_id: uuid.UUID, membership_id: uuid.UUID) -> None:
-        """Remove a member, raising 404 if the membership is not part of the project."""
+    async def remove_member(
+        self, project_id: uuid.UUID, membership_id: uuid.UUID, *, guard_last_owner: bool = False
+    ) -> None:
+        """Remove a member.
+
+        Raises:
+            HTTPException: 404 if the membership is not part of the project, 409 if ``guard_last_owner`` is set
+                and the last project owner would be removed.
+        """
         membership = await self._get_membership(project_id, membership_id)
+        if guard_last_owner:
+            await self._ensure_not_last_owner(membership)
         await self.db.delete(membership)
         await self.db.commit()
+
+    async def _ensure_not_last_owner(self, membership: ProjectMembership) -> None:
+        if membership.role != ProjectRole.OWNER:
+            return
+        owner_count = (
+            await self.db.execute(
+                select(func.count())
+                .select_from(ProjectMembership)
+                .where(
+                    ProjectMembership.project_id == membership.project_id, ProjectMembership.role == ProjectRole.OWNER
+                )
+            )
+        ).scalar_one()
+        if owner_count <= 1:
+            raise HTTPException(
+                status_code=409, detail="The last project owner cannot be removed or demoted by a project owner"
+            )
 
     async def _find_user(self, data: ProjectMemberCreate) -> User:
         stmt = select(User).where(

@@ -57,17 +57,27 @@ async def list_models(
     }
 
 
-async def _authorize_model_creation(identity: CurrentIdentity, project_id: uuid.UUID, db: AsyncSession) -> None:
-    """Allow global owners and editors/owners of the project; service accounts may also use the default project."""
+async def _authorize_model_creation(identity: CurrentIdentity, project_id: uuid.UUID, db: AsyncSession) -> bool:
+    """Authorize model creation in a project.
+
+    Global owners and editors/owners of the project are allowed; service accounts may also use the default project.
+
+    Returns:
+        True if a service account was allowed only through the default-project fallback (it then needs a
+        ModelAccess grant), False if access derives from global ownership or a project membership.
+
+    Raises:
+        HTTPException: 403 if the identity may not create models in the project.
+    """
     if has_global_access(identity):
-        return
+        return False
     if await get_project_role(identity, project_id, db) in WRITE_ROLES:
-        return
+        return False
     if identity.is_service_account:
         # Backward compatibility: service accounts without membership may create models in the default project
         project = await ProjectService(db).get_project(project_id)
         if project.name == DEFAULT_PROJECT_NAME:
-            return
+            return True
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Service account cannot create models in this project"
         )
@@ -85,13 +95,13 @@ async def create_model(
         project_id = (await get_or_create_default_project(db)).id
     else:
         project_id = (await ProjectService(db).get_project(data.project_id)).id
-    await _authorize_model_creation(identity, project_id, db)
+    needs_access_grant = await _authorize_model_creation(identity, project_id, db)
 
     svc = ModelService(db)
     model = await svc.create_model(data, project_id)
 
-    # Auto-grant write access when a service account creates a model
-    if identity.is_service_account and identity.service_account_id:
+    # Only the backward-compat path grants a ModelAccess entry; membership-based access must stay revocable
+    if needs_access_grant and identity.service_account_id:
         access = ModelAccess(
             model_id=model.id,
             service_account_id=uuid.UUID(identity.service_account_id),

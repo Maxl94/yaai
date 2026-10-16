@@ -189,12 +189,24 @@ class TestOrchestration:
     async def test_get_or_create_model_reuses_existing(self):
         existing = MagicMock()
         existing.name = "llm-app-metadata"
+        existing.project_name = "default"
         client = _mock_client([existing])
 
         result = await example.get_or_create_model(client, "llm-app-metadata")
 
         assert result is existing
         client.create_model.assert_not_called()
+
+    async def test_get_or_create_model_ignores_same_name_in_other_project(self):
+        other = MagicMock()
+        other.name = "llm-app-metadata"
+        other.project_name = "team-x"
+        client = _mock_client([other])
+
+        result = await example.get_or_create_model(client, "llm-app-metadata")
+
+        assert result is not other
+        client.create_model.assert_called_once()
 
     async def test_get_or_create_model_creates_when_missing(self):
         client = _mock_client()

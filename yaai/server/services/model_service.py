@@ -1,8 +1,9 @@
 import logging
 import uuid
+from typing import NoReturn
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -40,7 +41,8 @@ class ModelService:
             The newly created Model with eagerly loaded relations.
 
         Raises:
-            HTTPException: 409 if the project already contains a model with this name.
+            HTTPException: 404 if the project was deleted concurrently, 409 if the project already contains a
+                model with this name.
         """
         model = Model(name=data.name, description=data.description, project_id=project_id)
         self.db.add(model)
@@ -48,15 +50,21 @@ class ModelService:
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
-            raise HTTPException(status_code=409, detail="Model with this name already exists in this project") from None
+            await self._raise_project_gone_or_name_clash(project_id)
         return await self.get_model(model.id)
+
+    async def _raise_project_gone_or_name_clash(self, project_id: uuid.UUID) -> NoReturn:
+        """Map an IntegrityError of a model write: missing project (foreign key) -> 404, otherwise name clash -> 409."""
+        if (await self.db.execute(select(Project.id).where(Project.id == project_id))).first() is None:
+            raise HTTPException(status_code=404, detail="Project not found") from None
+        raise HTTPException(status_code=409, detail="Model with this name already exists in this project") from None
 
     async def list_models(
         self,
         page: int = 1,
         page_size: int = 20,
         search: str | None = None,
-        model_ids: list[uuid.UUID] | None = None,
+        model_ids: Select | None = None,
         project_id: uuid.UUID | None = None,
     ):
         """Return a paginated list of model summaries with inference counts.
@@ -144,6 +152,7 @@ class ModelService:
             if await self.db.get(Project, data.project_id) is None:
                 raise HTTPException(status_code=404, detail="Project not found")
             model.project_id = data.project_id
+        target_project_id = model.project_id
         if data.name is not None:
             model.name = data.name
         if data.description is not None:
@@ -152,7 +161,7 @@ class ModelService:
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
-            raise HTTPException(status_code=409, detail="Model with this name already exists in this project") from None
+            await self._raise_project_gone_or_name_clash(target_project_id)
         self.db.expire(model)  # reload the project relationship after a move
         return await self.get_model(model_id)
 

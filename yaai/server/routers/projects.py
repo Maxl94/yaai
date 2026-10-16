@@ -113,17 +113,19 @@ async def update_member(
     project_id: uuid.UUID,
     membership_id: uuid.UUID,
     data: ProjectMemberUpdate,
-    _identity: CurrentIdentity = Depends(require_project_admin),
+    identity: CurrentIdentity = Depends(require_project_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return {"data": await ProjectService(db).update_member_role(project_id, membership_id, data.role)}
+    svc = ProjectService(db)
+    guard = not has_global_access(identity)
+    return {"data": await svc.update_member_role(project_id, membership_id, data.role, guard_last_owner=guard)}
 
 
 @router.delete("/{project_id}/members/{membership_id}", status_code=204)
 async def remove_member(
     project_id: uuid.UUID,
     membership_id: uuid.UUID,
-    _identity: CurrentIdentity = Depends(require_project_admin),
+    identity: CurrentIdentity = Depends(require_project_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    await ProjectService(db).remove_member(project_id, membership_id)
+    await ProjectService(db).remove_member(project_id, membership_id, guard_last_owner=not has_global_access(identity))

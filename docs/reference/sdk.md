@@ -176,6 +176,12 @@ asyncio.run(main())
 | `validate_model_version_schema(model_id, version_id, inputs, outputs)` | Validate a record against a version's schema |
 | `validate_model_version_schema_batch(model_id, version_id, records)` | Validate a batch against a version's schema |
 
+> **Server version:** `project_id` and `list_projects()` require a server version with projects (introduced together
+> with this SDK release). The SDK does not filter client-side: an older server ignores the `project_id` query
+> parameter of `list_models()` and returns the models of all projects, and `list_projects()` fails with a 404.
+> Upgrade the server before using these features. Model names are unique per project, so look models up by ID (or by
+> name within one project) when the same name can exist in several projects.
+
 ## Full API reference
 
 Auto-generated from source:
