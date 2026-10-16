@@ -6,6 +6,7 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { HistogramData } from '@/types'
+import { bucketTooltipTitle, escapeHtml, formatBucketLabel } from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -17,20 +18,42 @@ const props = defineProps<{
   labelB?: string
 }>()
 
+const COLOR_A = 'rgba(13, 148, 136, 0.7)'
+const COLOR_B = 'rgba(245, 158, 11, 0.45)'
+
+type TooltipItem = { dataIndex: number; seriesName: string; value: number; marker: string }
+
 const option = computed(() => {
   const bucketsA = props.dataA.buckets
   const bucketsB = props.dataB.buckets
-  
-  // Use A's buckets as labels (they should be aligned)
-  const labels = bucketsA.map((b) => `${b.range_start.toFixed(1)}`)
+  const nameA = props.labelA || 'Period A'
+  const nameB = props.labelB || 'Period B'
+
+  // Both sides share the same edges; fall back to B if A has no data.
+  const reference = bucketsA.length > 0 ? bucketsA : bucketsB
+
+  const seriesData = (buckets: typeof bucketsA, color: string) =>
+    buckets.map((b) => ({
+      value: b.count,
+      itemStyle:
+        b.is_underflow || b.is_overflow
+          ? { color, opacity: 0.5, borderColor: color, borderType: 'dashed', borderWidth: 1 }
+          : { color },
+    }))
 
   return {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      formatter: (params: TooltipItem[]) => {
+        const bucket = reference[params[0]?.dataIndex ?? 0]
+        if (!bucket) return ''
+        const rows = params.map((p) => `${p.marker} ${escapeHtml(p.seriesName)}: ${p.value}`)
+        return [bucketTooltipTitle(bucket), ...rows].join('<br/>')
+      },
     },
     legend: {
-      data: [props.labelA || 'Period A', props.labelB || 'Period B'],
+      data: [nameA, nameB],
       top: 0,
     },
     grid: {
@@ -42,10 +65,13 @@ const option = computed(() => {
     },
     xAxis: {
       type: 'category',
-      data: labels,
+      data: reference.map((b) => formatBucketLabel(b)),
       axisLabel: {
-        rotate: 45,
         fontSize: 10,
+        interval: 'auto',
+        hideOverlap: true,
+        overflow: 'truncate',
+        width: 56,
       },
     },
     yAxis: {
@@ -54,21 +80,15 @@ const option = computed(() => {
     },
     series: [
       {
-        name: props.labelA || 'Period A',
+        name: nameA,
         type: 'bar',
-        data: bucketsA.map((b) => b.count),
-        itemStyle: {
-          color: 'rgba(13, 148, 136, 0.7)',
-        },
+        data: seriesData(bucketsA, COLOR_A),
         barWidth: '35%',
       },
       {
-        name: props.labelB || 'Period B',
+        name: nameB,
         type: 'bar',
-        data: bucketsB.map((b) => b.count),
-        itemStyle: {
-          color: 'rgba(245, 158, 11, 0.45)',
-        },
+        data: seriesData(bucketsB, COLOR_B),
         barWidth: '35%',
       },
     ],
