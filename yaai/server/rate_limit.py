@@ -7,6 +7,8 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
+from yaai.server.config import env_bool
+
 
 def _is_ip_address(value: str) -> bool:
     try:
@@ -39,5 +41,4 @@ def get_client_key(request: Request) -> str:
 
 limiter = Limiter(key_func=get_client_key, storage_uri=os.environ.get("RATE_LIMIT_STORAGE_URI") or "memory://")
 
-if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() == "false":
-    limiter.enabled = False
+limiter.enabled = env_bool("RATE_LIMIT_ENABLED", True)

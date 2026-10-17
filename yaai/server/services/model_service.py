@@ -369,6 +369,8 @@ class ModelService:
 
         for existing_field in version.schema_fields:
             await self.db.delete(existing_field)
+        # Unit of work runs INSERTs before DELETEs; flush so reused field names don't hit uq_schema_field.
+        await self.db.flush()
 
         for field_data in fields:
             field = SchemaField(

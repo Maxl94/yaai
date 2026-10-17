@@ -160,6 +160,18 @@ class YaaiClient:
         self._raise_for_status(resp)
         return resp
 
+    async def _get_all_pages(self, url: str, params: dict[str, str] | None = None) -> list[dict]:
+        """Fetch every page of a paginated list endpoint (``{"data": [...], "meta": {"total": ...}}``)."""
+        items: list[dict] = []
+        page = 1
+        while True:
+            resp = await self._request("GET", url, params={**(params or {}), "page": page, "page_size": 100})
+            body = resp.json()
+            items.extend(body["data"])
+            if not body["data"] or len(items) >= body["meta"]["total"]:
+                return items
+            page += 1
+
     async def __aenter__(self) -> YaaiClient:
         return self
 
@@ -202,8 +214,7 @@ class YaaiClient:
     async def list_models(self, project_id: uuid.UUID | None = None) -> list[ModelRead]:
         """List the models you can access, optionally restricted to one project."""
         params = {"project_id": str(project_id)} if project_id is not None else None
-        resp = await self._request("GET", "/models", params=params)
-        return [ModelRead.model_validate(m) for m in resp.json()["data"]]
+        return [ModelRead.model_validate(m) for m in await self._get_all_pages("/models", params)]
 
     async def list_projects(self) -> list[ProjectRead]:
         """List the projects you can access, including your role (``my_role``) and model counts."""

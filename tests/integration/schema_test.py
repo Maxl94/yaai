@@ -104,6 +104,24 @@ async def test_overwrite_schema(client: AsyncClient):
     assert "risk" in field_names
 
 
+async def test_overwrite_schema_reusing_field_names(client: AsyncClient):
+    model_id, version_id = await _setup(client)
+    url = f"/api/v1/models/{model_id}/versions/{version_id}/schema"
+    fields = [
+        {"field_name": "temperature", "direction": "input", "data_type": "numerical"},
+        {"field_name": "risk", "direction": "output", "data_type": "numerical"},
+    ]
+    assert (await client.put(url, json=fields)).status_code == 200
+
+    fields[0]["data_type"] = "categorical"
+    resp = await client.put(url, json=fields)
+    assert resp.status_code == 200
+
+    version_resp = await client.get(f"/api/v1/models/{model_id}/versions/{version_id}")
+    persisted = {f["field_name"]: f["data_type"] for f in version_resp.json()["data"]["schema_fields"]}
+    assert persisted == {"temperature": "categorical", "risk": "numerical"}
+
+
 async def test_overwrite_schema_requires_output(client: AsyncClient):
     model_id, version_id = await _setup(client)
     resp = await client.put(
