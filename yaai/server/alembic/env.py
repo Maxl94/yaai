@@ -13,12 +13,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-# Derive sync URL from DATABASE_URL (strip +asyncpg driver) if set
+# Derive sync URL from DATABASE_URL (+asyncpg -> +psycopg2) if set
 _db_url = os.environ.get("DATABASE_URL")
 if _db_url:
     import re
 
-    config.set_main_option("sqlalchemy.url", re.sub(r"\+asyncpg", "", _db_url))
+    config.set_main_option("sqlalchemy.url", re.sub(r"\+asyncpg", "+psycopg2", _db_url))
 
 target_metadata = Base.metadata
 

@@ -89,8 +89,11 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_url_sync(self) -> str:
-        """Derive sync DB URL from async URL by stripping the +asyncpg driver suffix."""
-        return re.sub(r"\+asyncpg", "", self.database_url)
+        """Derive sync DB URL from async URL by swapping the +asyncpg driver for +psycopg2.
+
+        Explicit driver avoids SQLAlchemy 2.1 defaulting plain postgresql:// to psycopg (v3).
+        """
+        return re.sub(r"\+asyncpg", "+psycopg2", self.database_url)
 
 
 settings = Settings()
