@@ -60,7 +60,7 @@ docker compose up db -d
 
 # Generate the migration
 DATABASE_URL="postgresql+asyncpg://aimon:changeme@localhost:5431/aimonitoring" \
-  uv run alembic revision --autogenerate -m "short description of change"
+  uv run alembic -c yaai/server/alembic.ini revision --autogenerate -m "short description of change"
 ```
 
 This creates a new file in `yaai/server/alembic/versions/`. Review it -- autogenerate is good but not perfect. Check that it captures your changes correctly and doesn't include unintended operations.
