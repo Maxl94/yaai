@@ -180,7 +180,7 @@ Once data starts flowing, open [http://localhost:8000](http://localhost:8000) an
 
 ![Drift](screenshots/model_version_drift.jpeg)
 
-**Comparisons** -- pick any two time ranges and compare distributions side by side. Overlaid histograms for numerical features, grouped bar charts for categorical ones. PSI / KS / Chi-squared scores computed inline.
+**Comparisons** -- pick any two time ranges, a reference, or another version (same or different model) and compare distributions side by side. Overlaid histograms for numerical features, grouped bar charts for categorical ones. PSI / KS / Chi-squared scores computed inline.
 
 ![Comparison](screenshots/model_version_data_compare.jpeg)
 

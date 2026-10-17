@@ -19,6 +19,8 @@ YAAI Monitoring (Yet Another AI Monitoring) is a self-hosted platform for automa
 ![Schema](screenshots/model_version_schema.jpeg)
 
 ### Data Comparison
+Compare time windows, a reference, or another version (same or different model) side by side.
+
 ![Data Comparison](screenshots/model_version_data_compare.jpeg)
 
 ### Drift Overview
