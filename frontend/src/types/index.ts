@@ -303,6 +303,20 @@ export interface ComparisonPanel {
   drift_score?: DriftScore
 }
 
+export interface SchemaDiffItem {
+  field_name: string
+  direction: 'input' | 'output'
+  status: 'only_in_a' | 'only_in_b' | 'type_changed'
+  data_type_a: string | null
+  data_type_b: string | null
+}
+
+export interface ComparisonResponse {
+  model_version_id: string
+  panels: ComparisonPanel[]
+  schema_diff: SchemaDiffItem[]
+}
+
 // Drift Overview types
 export interface DriftOverviewItem {
   model_id: string

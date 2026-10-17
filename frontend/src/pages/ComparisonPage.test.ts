@@ -1,5 +1,20 @@
-import { describe, it, expect } from 'vitest'
-import type { ComparisonPanel, HistogramData, CategoricalData, DriftScore } from '@/types'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { createVuetify } from 'vuetify'
+import * as components from 'vuetify/components'
+import * as directives from 'vuetify/directives'
+import ComparisonPage from './ComparisonPage.vue'
+import { modelsApi } from '@/api/models'
+import { dashboardApi } from '@/api/dashboard'
+import type { ComparisonPanel, HistogramData, CategoricalData, DriftScore, SchemaDiffItem } from '@/types'
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ params: { modelId: 'm1', versionId: 'v2' } }),
+}))
+vi.mock('@/api/models', () => ({
+  modelsApi: { get: vi.fn(), getVersion: vi.fn(), list: vi.fn(), listVersions: vi.fn() },
+}))
+vi.mock('@/api/dashboard', () => ({ dashboardApi: { getComparison: vi.fn() } }))
 
 // Pure functions extracted from ComparisonPage.vue for testing.
 
@@ -85,5 +100,77 @@ describe('getDriftColor', () => {
   it('returns success when not drifted', () => {
     const score: DriftScore = { metric_name: 'psi', metric_value: 0.05, is_drifted: false, threshold: 0.1 }
     expect(getDriftColor(makePanel({ drift_score: score }))).toBe('success')
+  })
+})
+
+describe('ComparisonPage', () => {
+  const diff: SchemaDiffItem = {
+    field_name: 'score',
+    direction: 'output',
+    status: 'type_changed',
+    data_type_a: 'numerical',
+    data_type_b: 'categorical',
+  }
+
+  async function mountPage() {
+    const wrapper = mount(ComparisonPage, {
+      global: {
+        plugins: [createVuetify({ components, directives })],
+        stubs: { VersionNavTabs: true, OverlaidHistogram: true, GroupedBarChart: true, StatsSummary: true },
+      },
+    })
+    await flushPromises()
+    return wrapper
+  }
+
+  async function switchToOtherVersion(wrapper: Awaited<ReturnType<typeof mountPage>>) {
+    const btn = wrapper.findAll('button').find((b) => b.text() === 'Other version')!
+    await btn.trigger('click')
+    await flushPromises()
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(modelsApi.get).mockResolvedValue({ id: 'm1', name: 'Model' } as never)
+    vi.mocked(modelsApi.getVersion).mockResolvedValue({ id: 'v2', version: 'v2' } as never)
+    vi.mocked(modelsApi.list).mockResolvedValue([{ id: 'm1', name: 'Model' }] as never)
+    vi.mocked(modelsApi.listVersions).mockResolvedValue([
+      { id: 'v2', version: 'v2' },
+      { id: 'v1', version: 'v1' },
+    ] as never)
+    vi.mocked(dashboardApi.getComparison).mockResolvedValue({ model_version_id: 'v2', panels: [], schema_diff: [] })
+  })
+
+  it('keeps time_window params unchanged', async () => {
+    await mountPage()
+    const [, , params] = vi.mocked(dashboardApi.getComparison).mock.calls[0]!
+    expect(params.mode).toBe('time_window')
+    expect(params).not.toHaveProperty('other_version_id')
+  })
+
+  it('sends other model/version and same period B as A in vs_version mode', async () => {
+    const wrapper = await mountPage()
+    await switchToOtherVersion(wrapper)
+    const [modelId, versionId, params] = vi.mocked(dashboardApi.getComparison).mock.lastCall!
+    expect([modelId, versionId]).toEqual(['m1', 'v2'])
+    expect(params).toMatchObject({
+      mode: 'vs_version',
+      other_model_id: 'm1',
+      other_version_id: 'v1',
+    })
+    expect(params.from_b).toBe(params.from_a)
+    expect(params.to_b).toBe(params.to_a)
+  })
+
+  it('renders schema_diff as fields not compared', async () => {
+    vi.mocked(dashboardApi.getComparison).mockResolvedValue({
+      model_version_id: 'v2',
+      panels: [],
+      schema_diff: [diff],
+    })
+    const wrapper = await mountPage()
+    await switchToOtherVersion(wrapper)
+    expect(wrapper.text()).toContain('Fields not compared')
+    expect(wrapper.text()).toContain('score (output): type changed: numerical → categorical')
   })
 })
