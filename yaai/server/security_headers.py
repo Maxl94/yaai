@@ -1,9 +1,9 @@
 """Security response headers (CSP, HSTS, clickjacking and MIME-sniffing protection)."""
 
-import os
-
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from yaai.server.config import env_bool
 
 # Vite emits external module scripts only; Vuetify needs inline styles; ECharts renders to canvas.
 SPA_CSP = (
@@ -34,7 +34,7 @@ _STATIC_HEADERS = {
 
 def security_headers_enabled() -> bool:
     """Return whether security headers are enabled (SECURITY_HEADERS_ENABLED, default true)."""
-    return os.environ.get("SECURITY_HEADERS_ENABLED", "true").lower() not in ("false", "0", "no")
+    return env_bool("SECURITY_HEADERS_ENABLED", True)
 
 
 class SecurityHeadersMiddleware:

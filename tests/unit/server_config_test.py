@@ -2,7 +2,7 @@
 
 import pytest
 
-from yaai.server.config import api_docs_enabled, is_production, resolve_session_secret
+from yaai.server.config import api_docs_enabled, env_bool, is_production, resolve_session_secret
 
 
 @pytest.mark.parametrize(
@@ -11,6 +11,21 @@ from yaai.server.config import api_docs_enabled, is_production, resolve_session_
 def test_is_production(monkeypatch, env, expected):
     monkeypatch.setenv("ENVIRONMENT", env)
     assert is_production() is expected
+
+
+@pytest.mark.parametrize(
+    ("value", "default", "expected"),
+    [("true", False, True), ("1", False, True), ("YES", False, True), ("false", True, False), ("0", True, False)]
+    + [("no", True, False), ("", True, True), ("", False, False), ("maybe", True, True), ("maybe", False, False)],
+)
+def test_env_bool(monkeypatch, value, default, expected):
+    monkeypatch.setenv("SOME_FLAG", value)
+    assert env_bool("SOME_FLAG", default) is expected
+
+
+def test_env_bool_unset_uses_default(monkeypatch):
+    monkeypatch.delenv("SOME_FLAG", raising=False)
+    assert env_bool("SOME_FLAG", True) is True
 
 
 class TestApiDocsEnabled:

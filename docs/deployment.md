@@ -13,8 +13,8 @@ Before going live, make sure you've set these:
 - **`BASE_URL`** -- your public URL (e.g. `https://yaai.mycompany.com`). Used for CORS, OAuth redirects, and service account audience.
 - **`DATABASE_URL`** -- point to a managed PostgreSQL instance with strong credentials (not `changeme`)
 - **`AUTH_JWT_SECRET`** and **`SESSION_SECRET`** -- **required** in production; the server refuses to start without them (a missing secret would silently log users out on every restart and break multiple instances). Generate with `openssl rand -base64 32`.
-- **`BOOTSTRAP_ADMIN_PASSWORD`** -- recommended for the first start (min. 12 characters); **effectively required on Cloud Run**, where you cannot read files inside an instance. Otherwise a password is generated and written to a new `0600` file (`BOOTSTRAP_ADMIN_PASSWORD_FILE`, never overwritten) and never to the log. Only if that file cannot be created is the password printed once to stderr, which in containers usually means the log stream -- avoid this by setting the variable or pointing the file to a writable path. The admin account is only created after the password has been delivered.
-- **`RATE_LIMIT_TRUSTED_PROXY_HOPS`** -- set to the number of reverse proxies in front of YAAI, otherwise all users share one rate-limit bucket: `1` when Cloud Run is accessed directly, typically `2` behind an external HTTPS load balancer (which sends `X-Forwarded-For: <client>, <load-balancer-ip>`). Check the header your deployment actually receives.
+- **`BOOTSTRAP_ADMIN_PASSWORD`** -- recommended for the first start (min. 12 characters); **effectively required on Cloud Run**, where you cannot read files inside an instance. Details: [Configuration](configuration.md#security-and-multi-instance-operation).
+- **`RATE_LIMIT_TRUSTED_PROXY_HOPS`** -- set to the number of reverse proxies in front of YAAI, otherwise all users share one rate-limit bucket (`1` when Cloud Run is accessed directly, typically `2` behind an external HTTPS load balancer; see [Configuration](configuration.md#security-and-multi-instance-operation)).
 - **API docs** -- `/docs`, `/redoc` and `/openapi.json` are disabled in production. Set `API_DOCS_ENABLED=true` to expose them.
 
 ## Docker Compose
@@ -42,7 +42,7 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 === "Local auth (default)"
 
-    Username + password login with API key auth for service accounts. An admin account is created automatically on first startup. Set `BOOTSTRAP_ADMIN_PASSWORD` or read the generated password from `admin-initial-password.txt` in the container working directory (never logged).
+    Username + password login with API key auth for service accounts. An admin account is created automatically on first startup. Set `BOOTSTRAP_ADMIN_PASSWORD` or read the generated password from `admin-initial-password.txt` in the container working directory (see [Configuration](configuration.md#security-and-multi-instance-operation)).
 
     ```yaml
     services:
@@ -305,7 +305,7 @@ async with YaaiClient("https://yaai.mycompany.com/api/v1") as client:
 ## Security
 
 - **Security headers** -- every response carries a Content-Security-Policy (`script-src 'self'`, no framing, no plugins), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`; `Strict-Transport-Security` is added when `BASE_URL` is `https://` or the request arrives over HTTPS. Disable with `SECURITY_HEADERS_ENABLED=false` only if your reverse proxy sets equivalent headers. When `/docs` is enabled it gets a relaxed CSP that allows `cdn.jsdelivr.net`.
-- **Rate limiting** -- keyed by client IP. Behind a proxy set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (see below); YAAI then uses the N-th entry from the right of `X-Forwarded-For`, ignoring client-supplied entries on the left.
+- **Rate limiting** -- keyed by client IP. Behind a proxy set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (see [Configuration](configuration.md#security-and-multi-instance-operation)); YAAI then uses the N-th entry from the right of `X-Forwarded-For`, ignoring client-supplied entries on the left.
 - **Residual risk: tokens in `localStorage`** -- the web UI stores access and refresh tokens in the browser's `localStorage`, so a successful XSS could read them. The strict CSP (no inline or third-party scripts) is the mitigation; moving tokens to `httpOnly` cookies is not implemented. Keep dependencies updated and do not add third-party scripts to the frontend.
 
 ## Running multiple instances
@@ -316,13 +316,13 @@ YAAI is designed as a single instance, but can run several (for example Cloud Ru
 |---|---|---|
 | `AUTH_JWT_SECRET`, `SESSION_SECRET` | Required in production; tokens and OAuth state signed by one instance must validate on all others | Use the **same** values on every instance (Secret Manager) |
 | Rate limiting | Counters live in memory per instance, so the effective limit is multiplied by the instance count | Set `RATE_LIMIT_STORAGE_URI=redis://host:6379` (install the Redis client, e.g. `pip install redis`; it is not a YAAI dependency) |
-| Client IP | Behind a proxy every user may share its IP | Set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (`1` on Cloud Run accessed directly, typically `2` behind an external HTTPS load balancer) |
+| Client IP | Behind a proxy every user may share its IP | Set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (see [Configuration](configuration.md#security-and-multi-instance-operation)) |
 | OAuth code store and token caches | Kept in memory per instance | Use session affinity, or run a single instance |
-| Scheduled drift jobs | Every instance with `SCHEDULER_ENABLED=true` runs its own in-memory scheduler, so each cron job fires on every such instance | A PostgreSQL advisory lock makes an overlapping execution on another instance skip. Every scheduler re-reads the active jobs from the database every `SCHEDULER_SYNC_INTERVAL_SECONDS` (default `60`), so creating, rescheduling, pausing or deleting a job on any instance reaches all schedulers within that interval |
+| Scheduled drift jobs | Every instance with `SCHEDULER_ENABLED=true` runs its own in-memory scheduler, so each cron job fires on every such instance | A PostgreSQL advisory lock makes an overlapping execution on another instance skip. Every scheduler re-reads the active jobs from the database every 60 seconds, so creating, rescheduling, pausing or deleting a job on any instance reaches all schedulers within that time |
 
 The advisory lock only prevents jobs from running **concurrently**; if one instance finishes before another instance's trigger fires, the job can still run twice. The lock is skipped on non-PostgreSQL databases. A job needs one database connection for its whole run (the lock is held on the connection that runs the job).
 
-Job changes made through the API are applied immediately on the instance that served the request and on all other schedulers at the next reconciliation (at most `SCHEDULER_SYNC_INTERVAL_SECONDS` later). Reconciliation only runs where `SCHEDULER_ENABLED=true`.
+Job changes made through the API are applied immediately on the instance that served the request and on all other schedulers at the next reconciliation (at most 60 seconds later). Reconciliation only runs where `SCHEDULER_ENABLED=true`.
 
 Two supported layouts:
 

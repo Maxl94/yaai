@@ -19,7 +19,6 @@ from yaai.server.database import get_db
 from yaai.server.models.auth import ServiceAccount, User
 from yaai.server.schemas.job import (
     DriftResultRead,
-    JobConfigRead,
     JobConfigUpdate,
     JobRunRead,
 )
@@ -65,7 +64,7 @@ async def get_job(
     await check_model_read_access(model_id, identity, db)
     svc = JobService(db)
     job = await svc.get_job(job_id)
-    return {"data": JobConfigRead.model_validate(job)}
+    return {"data": (await svc.to_read([job]))[0]}
 
 
 @router.get("/models/{model_id}/versions/{version_id}/jobs")
@@ -78,7 +77,7 @@ async def list_jobs_for_version(
     await check_version_read_access(model_id, version_id, identity, db)
     svc = JobService(db)
     jobs = await svc.list_jobs(version_id)
-    return {"data": [JobConfigRead.model_validate(j) for j in jobs]}
+    return {"data": await svc.to_read(jobs)}
 
 
 @router.get("/jobs")
@@ -89,11 +88,11 @@ async def list_all_jobs(
     db: AsyncSession = Depends(get_db),
 ):
     """List all jobs across all models/versions."""
-    model_ids = await get_accessible_model_ids(identity, db)
+    model_ids = await get_accessible_model_ids(identity)
     svc = JobService(db)
     jobs, total = await svc.list_all_jobs(page, page_size, model_ids=model_ids)
     return {
-        "data": [JobConfigRead.model_validate(j) for j in jobs],
+        "data": await svc.to_read(jobs),
         "meta": PaginationMeta(total=total, page=page, page_size=page_size),
     }
 
@@ -109,7 +108,7 @@ async def update_job(
     await check_model_write_access(model_id, identity, db)
     svc = JobService(db)
     job = await svc.update_job(job_id, data)
-    return {"data": JobConfigRead.model_validate(job)}
+    return {"data": (await svc.to_read([job]))[0]}
 
 
 @router.get("/jobs/{job_id}/runs")
@@ -165,7 +164,7 @@ async def drift_overview(
     db: AsyncSession = Depends(get_db),
 ):
     """Overview of drift status for all models with active versions."""
-    model_ids = await get_accessible_model_ids(identity, db)
+    model_ids = await get_accessible_model_ids(identity)
     svc = JobService(db)
     items, total = await svc.get_drift_overview(page, page_size, model_ids=model_ids)
     return {
@@ -204,7 +203,7 @@ async def list_notifications(
 ):
     if _is_unlinked_api_key(identity):
         return {"data": [], "meta": PaginationMeta(total=0, page=page, page_size=page_size)}
-    model_ids = await get_accessible_model_ids(identity, db)
+    model_ids = await get_accessible_model_ids(identity)
     svc = JobService(db)
     notifications, total = await svc.list_notifications(
         is_read, model_version_id, page, page_size, model_ids=model_ids, reader=await _notification_reader(identity, db)
@@ -236,7 +235,7 @@ async def mark_all_read(
 ):
     if _is_unlinked_api_key(identity):
         return {"data": {"marked_read": 0}}
-    model_ids = await get_accessible_model_ids(identity, db)
+    model_ids = await get_accessible_model_ids(identity)
     svc = JobService(db)
     count = await svc.mark_all_notifications_read(model_ids=model_ids, reader=await _notification_reader(identity, db))
     return {"data": {"marked_read": count}}

@@ -39,6 +39,8 @@ async def test_get_single_job(client: AsyncClient):
     data = resp.json()["data"]
     assert data["id"] == job["id"]
     assert data["name"] == job["name"]
+    assert data["model_id"] == model_id
+    assert data["project_id"] == (await client.get(f"/api/v1/models/{model_id}")).json()["data"]["project_id"]
 
 
 async def test_list_jobs(client: AsyncClient):
@@ -58,6 +60,7 @@ async def test_list_all_jobs(client: AsyncClient):
     assert resp.status_code == 200
     jobs = resp.json()["data"]
     assert len(jobs) >= 1
+    assert any(j["model_version_id"] == version_id and j["model_id"] == model_id and j["project_id"] for j in jobs)
     assert "meta" in resp.json()
 
 

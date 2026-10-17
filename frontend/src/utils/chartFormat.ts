@@ -1,11 +1,11 @@
 import { format } from 'echarts/core'
 import type { CategoryCount, HistogramBucket } from '@/types'
 
-export const TOP_CATEGORIES = 10
-export const HORIZONTAL_LABEL_THRESHOLD = 12
+const TOP_CATEGORIES = 10
+const HORIZONTAL_LABEL_THRESHOLD = 12
 
 /** Labels always use one locale so decimal separators match the tooltips and statistics. */
-export const LABEL_LOCALE = 'en-US'
+const LABEL_LOCALE = 'en-US'
 
 /** Compact notation is only used if the bin width is at least this fraction of the value. */
 const COMPACT_MIN_WIDTH_RATIO = 0.01
@@ -76,16 +76,12 @@ export function isHorizontalLayout(labels: string[], threshold = HORIZONTAL_LABE
   return labels.some((l) => l.length > threshold)
 }
 
-export interface CategoryBar {
+interface CategoryBar {
   label: string
   count: number
   percentage: number
   /** Number of aggregated categories if this is the "Other" bar. */
   otherCount?: number
-}
-
-function otherLabel(n: number): string {
-  return `Other (${n})`
 }
 
 /** Full text for tooltips; the short "Other (N)" axis label is expanded. */
@@ -94,25 +90,29 @@ export function categoryDisplayName(label: string, otherCount?: number): string 
   return `Other (${otherCount} ${otherCount === 1 ? 'category' : 'categories'})`
 }
 
+/** Fields of the summed "Other" bar that replaces all categories beyond the top N. */
+const otherLabel = (rest: unknown[]) => ({ label: `Other (${rest.length})`, otherCount: rest.length })
+
+const sumBy = <T>(items: T[], key: (item: T) => number) => items.reduce((sum, item) => sum + key(item), 0)
+
 /** Keep the `topN` most frequent categories and sum the rest into one "Other" bar. */
 export function aggregateTopCategories(categories: CategoryCount[], topN = TOP_CATEGORIES): CategoryBar[] {
-  const sorted = [...categories].sort((a, b) => b.count - a.count)
-  const bars: CategoryBar[] = sorted
-    .slice(0, topN)
+  const sorted = categories
     .map((c) => ({ label: c.value, count: c.count, percentage: c.percentage }))
+    .sort((a, b) => b.count - a.count)
+  const bars = sorted.slice(0, topN)
   const rest = sorted.slice(topN)
   if (rest.length > 0) {
     bars.push({
-      label: otherLabel(rest.length),
-      count: rest.reduce((sum, c) => sum + c.count, 0),
-      percentage: rest.reduce((sum, c) => sum + c.percentage, 0),
-      otherCount: rest.length,
+      ...otherLabel(rest),
+      count: sumBy(rest, (c) => c.count),
+      percentage: sumBy(rest, (c) => c.percentage),
     })
   }
   return bars
 }
 
-export interface GroupedCategoryBar {
+interface GroupedCategoryBar {
   label: string
   countA: number
   countB: number
@@ -136,14 +136,13 @@ export function aggregateGroupedCategories(
   const sorted = [...merged.entries()]
     .map(([label, counts]) => ({ label, ...counts }))
     .sort((x, y) => y.countA + y.countB - (x.countA + x.countB))
-  const bars: GroupedCategoryBar[] = sorted.slice(0, topN)
+  const bars = sorted.slice(0, topN)
   const rest = sorted.slice(topN)
   if (rest.length > 0) {
     bars.push({
-      label: otherLabel(rest.length),
-      countA: rest.reduce((sum, c) => sum + c.countA, 0),
-      countB: rest.reduce((sum, c) => sum + c.countB, 0),
-      otherCount: rest.length,
+      ...otherLabel(rest),
+      countA: sumBy(rest, (c) => c.countA),
+      countB: sumBy(rest, (c) => c.countB),
     })
   }
   return bars

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import uuid
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -11,6 +10,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
+from yaai.server.config import env_bool
 from yaai.server.models.job import JobConfig
 
 logger = logging.getLogger(__name__)
@@ -18,21 +18,12 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 SYNC_JOB_ID = "__scheduler_sync__"
-DEFAULT_SYNC_INTERVAL_SECONDS = 60
+SYNC_INTERVAL_SECONDS = 60
 
 
 def scheduler_enabled() -> bool:
     """Return whether this instance runs the scheduler (SCHEDULER_ENABLED, default true)."""
-    return os.environ.get("SCHEDULER_ENABLED", "true").lower() not in ("false", "0", "no")
-
-
-def scheduler_sync_interval_seconds() -> int:
-    """Return the schedule reconciliation interval (SCHEDULER_SYNC_INTERVAL_SECONDS, default 60)."""
-    try:
-        interval = int(os.environ.get("SCHEDULER_SYNC_INTERVAL_SECONDS", DEFAULT_SYNC_INTERVAL_SECONDS))
-    except ValueError:
-        return DEFAULT_SYNC_INTERVAL_SECONDS
-    return interval if interval > 0 else DEFAULT_SYNC_INTERVAL_SECONDS
+    return env_bool("SCHEDULER_ENABLED", True)
 
 
 def job_lock_key(job_config_id: uuid.UUID) -> int:
@@ -191,15 +182,15 @@ async def _run_sync_jobs() -> None:
         logger.exception("Scheduler reconciliation failed")
 
 
-def start_job_sync(interval_seconds: int) -> None:
+def start_job_sync() -> None:
     """Register the periodic reconciliation job that keeps this scheduler in sync with the database."""
     scheduler.add_job(
         _run_sync_jobs,
-        IntervalTrigger(seconds=interval_seconds),
+        IntervalTrigger(seconds=SYNC_INTERVAL_SECONDS),
         id=SYNC_JOB_ID,
         name="Scheduler reconciliation",
         max_instances=1,
         coalesce=True,
         replace_existing=True,
     )
-    logger.info("Scheduler reconciliation every %d seconds", interval_seconds)
+    logger.info("Scheduler reconciliation every %d seconds", SYNC_INTERVAL_SECONDS)

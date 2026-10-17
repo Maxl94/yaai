@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 # --8<-- [end:imports]
 
 # --8<-- [start:cost]
-# USD per 1M tokens: (input, output) -- fill in your provider's current prices
+# USD per 1M tokens: (input, output) -- illustrative values, fill in your provider's current prices
 PRICE_PER_1M_TOKENS: dict[str, tuple[float, float]] = {
+    "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-pro": (1.25, 10.00),
 }
 _warned_unpriced_models: set[str] = set()
 

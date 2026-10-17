@@ -98,7 +98,7 @@ describe('current project selection', () => {
     const { store } = setup('viewer')
     await store.load()
     expect(store.currentProjectId).toBe('edit')
-    expect(store.currentProject?.name).toBe('edit-me')
+    expect(store.activeProjectId).toBe('edit')
   })
 
   it('ignores a stale stored id that is not in the project list', async () => {

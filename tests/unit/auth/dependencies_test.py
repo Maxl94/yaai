@@ -268,16 +268,16 @@ class TestModelAccessWithoutDatabaseLookup:
 
     async def test_accessible_ids_none_for_owner(self, auth_config):
         identity = CurrentIdentity(user_id="u1", role=UserRole.OWNER, identity_type="user")
-        assert await get_accessible_model_ids(identity, AsyncMock()) is None
+        assert await get_accessible_model_ids(identity) is None
 
     async def test_accessible_ids_none_when_auth_disabled(self):
         set_auth_config(AuthConfig(enabled=False))
         identity = CurrentIdentity(user_id="u1", role=UserRole.VIEWER, identity_type="api_key")
-        assert await get_accessible_model_ids(identity, AsyncMock()) is None
+        assert await get_accessible_model_ids(identity) is None
 
     async def test_accessible_ids_empty_for_sa_without_id(self, auth_config):
         identity = CurrentIdentity(user_id=None, role=UserRole.VIEWER, identity_type="api_key", service_account_id=None)
-        query = await get_accessible_model_ids(identity, AsyncMock())
+        query = await get_accessible_model_ids(identity)
         assert any(marker in str(query).lower() for marker in ("false", "0 = 1"))
 
 

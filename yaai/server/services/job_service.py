@@ -15,7 +15,7 @@ from yaai.server.models.inference import InferenceData
 from yaai.server.models.job import DriftResult, JobConfig, JobRun, Notification, NotificationReadReceipt
 from yaai.server.models.model import Model, ModelVersion, SchemaField
 from yaai.server.scheduler import register_job
-from yaai.server.schemas.job import UNSET, JobConfigUpdate, NotificationRead
+from yaai.server.schemas.job import UNSET, JobConfigRead, JobConfigUpdate, NotificationRead
 from yaai.server.services.utils.pagination import paginate_query
 
 
@@ -84,6 +84,33 @@ class JobService:
             "details": drift_result.details,
             "created_at": created_at,
         }
+
+    async def to_read(self, jobs: list[JobConfig]) -> list[JobConfigRead]:
+        """Build read schemas for jobs, adding model and project IDs with a single lookup query."""
+        if not jobs:
+            return []
+        rows = await self.db.execute(
+            select(ModelVersion.id, ModelVersion.model_id, Model.project_id)
+            .join(Model, ModelVersion.model_id == Model.id)
+            .where(ModelVersion.id.in_({job.model_version_id for job in jobs}))
+        )
+        owners = {version_id: (model_id, project_id) for version_id, model_id, project_id in rows}
+        return [
+            JobConfigRead(
+                id=job.id,
+                model_version_id=job.model_version_id,
+                model_id=owners[job.model_version_id][0],
+                project_id=owners[job.model_version_id][1],
+                name=job.name,
+                schedule=job.schedule,
+                comparison_type=job.comparison_type,
+                window_size=job.window_size,
+                min_samples=job.min_samples,
+                is_active=job.is_active,
+                created_at=job.created_at,
+            )
+            for job in jobs
+        ]
 
     async def list_jobs(self, model_version_id: uuid.UUID) -> list[JobConfig]:
         """List all jobs for a specific model version."""
@@ -343,7 +370,8 @@ class JobService:
             )
 
         query = query.order_by(Notification.created_at.desc())
-        rows, total = await paginate_query(self.db, query, page, page_size, as_rows=True)
+        total = (await self.db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+        rows = (await self.db.execute(query.offset((page - 1) * page_size).limit(page_size))).all()
         return [self._to_read_schema(n, bool(read)) for n, read in rows], total
 
     @staticmethod

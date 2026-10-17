@@ -21,6 +21,8 @@ UNSET = _Unset.UNSET
 class JobConfigRead(BaseModel):
     id: uuid.UUID
     model_version_id: uuid.UUID
+    model_id: uuid.UUID
+    project_id: uuid.UUID
     name: str
     schedule: str
     comparison_type: ComparisonType

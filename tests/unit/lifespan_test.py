@@ -137,12 +137,11 @@ class TestLifespanScheduler:
     async def test_scheduler_enabled_loads_jobs_syncs_and_shuts_down(self, lifespan_env, monkeypatch):
         load_jobs, start_sync, scheduler = lifespan_env
         monkeypatch.delenv("SCHEDULER_ENABLED", raising=False)
-        monkeypatch.setenv("SCHEDULER_SYNC_INTERVAL_SECONDS", "30")
 
         async with main_mod.lifespan(main_mod.app):
             scheduler.running = True
 
         load_jobs.assert_awaited_once()
-        start_sync.assert_called_once_with(30)
+        start_sync.assert_called_once_with()
         scheduler.start.assert_called_once()
         scheduler.shutdown.assert_called_once_with(wait=False)
