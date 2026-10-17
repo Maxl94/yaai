@@ -38,7 +38,9 @@ async def get_dashboard(
 async def compare_dashboard(
     model_id: uuid.UUID,
     version_id: uuid.UUID,
-    mode: str = Query("time_window", pattern="^(time_window|vs_reference)$"),
+    mode: str = Query("time_window", pattern="^(time_window|vs_reference|vs_version)$"),
+    other_model_id: uuid.UUID | None = Query(None),
+    other_version_id: uuid.UUID | None = Query(None),
     from_a: datetime | None = Query(None),
     to_a: datetime | None = Query(None),
     from_b: datetime | None = Query(None),
@@ -48,7 +50,16 @@ async def compare_dashboard(
 ):
     await check_version_read_access(model_id, version_id, identity, db)
     svc = ComparisonService(db)
-    if mode == "vs_reference":
+    schema_diff: list[dict] = []
+    if mode == "vs_version":
+        if not (other_model_id and other_version_id and from_a and to_a and from_b and to_b):
+            raise HTTPException(
+                status_code=422,
+                detail="other_model_id, other_version_id, from_a, to_a, from_b, to_b are required for vs_version mode",
+            )
+        await check_version_read_access(other_model_id, other_version_id, identity, db)
+        panels, schema_diff = await svc.compare_versions(version_id, other_version_id, from_a, to_a, from_b, to_b)
+    elif mode == "vs_reference":
         if not from_a or not to_a:
             raise HTTPException(status_code=422, detail="from_a and to_a are required for vs_reference mode")
         panels = await svc.compare_vs_reference(version_id, from_a, to_a)
@@ -57,4 +68,4 @@ async def compare_dashboard(
             raise HTTPException(status_code=422, detail="from_a, to_a, from_b, to_b are required for time_window mode")
         panels = await svc.compare_time_windows(version_id, from_a, to_a, from_b, to_b)
 
-    return {"data": {"model_version_id": str(version_id), "panels": panels}}
+    return {"data": {"model_version_id": str(version_id), "panels": panels, "schema_diff": schema_diff}}
