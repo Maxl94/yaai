@@ -33,6 +33,10 @@ async function refreshProjects(): Promise<boolean> {
   return ok
 }
 
+function displayRole(project: Project): ProjectRole | null {
+  return projectsStore.isGlobalAdmin ? 'owner' : project.my_role
+}
+
 // Create / edit project
 const showProjectDialog = ref(false)
 const editingProject = ref<Project | null>(null)
@@ -40,16 +44,9 @@ const projectForm = ref({ name: '', description: '' })
 const savingProject = ref(false)
 const projectError = ref('')
 
-function openCreateProject() {
-  editingProject.value = null
-  projectForm.value = { name: '', description: '' }
-  projectError.value = ''
-  showProjectDialog.value = true
-}
-
-function openEditProject(project: Project) {
+function openProjectDialog(project: Project | null = null) {
   editingProject.value = project
-  projectForm.value = { name: project.name, description: project.description ?? '' }
+  projectForm.value = { name: project?.name ?? '', description: project?.description ?? '' }
   projectError.value = ''
   showProjectDialog.value = true
 }
@@ -147,12 +144,16 @@ const serviceAccountItems = computed(() => {
 })
 
 // Project owners cannot list users, so they add users by username; global owners pick from the user list
-const canPickPrincipals = computed(() => projectsStore.isGlobalAdmin)
-
 const canSubmitMember = computed(() => {
   if (principalType.value === 'service_account') return !!newServiceAccountId.value
-  return canPickPrincipals.value ? !!newUserId.value : !!newUsername.value.trim()
+  return projectsStore.isGlobalAdmin ? !!newUserId.value : !!newUsername.value.trim()
 })
+
+function resetNewPrincipal() {
+  newUsername.value = ''
+  newUserId.value = null
+  newServiceAccountId.value = null
+}
 
 function onPrincipalTypeChange() {
   if (principalType.value === 'service_account' && newRole.value === 'owner') {
@@ -186,19 +187,17 @@ async function openMembers(project: Project) {
   members.value = []
   membersError.value = ''
   principalType.value = 'user'
-  newUsername.value = ''
-  newUserId.value = null
-  newServiceAccountId.value = null
+  resetNewPrincipal()
   newRole.value = 'viewer'
   showMembersDialog.value = true
-  await Promise.all([loadMembers(project.id), canPickPrincipals.value ? loadPrincipalChoices() : Promise.resolve()])
+  await Promise.all([loadMembers(project.id), projectsStore.isGlobalAdmin ? loadPrincipalChoices() : Promise.resolve()])
 }
 
 function buildMemberPayload(): ProjectMemberCreate {
   if (principalType.value === 'service_account') {
     return { service_account_id: newServiceAccountId.value!, role: newRole.value }
   }
-  return canPickPrincipals.value
+  return projectsStore.isGlobalAdmin
     ? { user_id: newUserId.value!, role: newRole.value }
     : { username: newUsername.value.trim(), role: newRole.value }
 }
@@ -209,9 +208,7 @@ async function addMember() {
   membersError.value = ''
   try {
     await projectsApi.addMember(membersProject.value.id, buildMemberPayload())
-    newUsername.value = ''
-    newUserId.value = null
-    newServiceAccountId.value = null
+    resetNewPrincipal()
     await loadMembers(membersProject.value.id)
   } catch (error) {
     membersError.value = errorMessage(error, 'Failed to add member')
@@ -279,7 +276,7 @@ onMounted(refreshProjects)
         color="primary"
         prepend-icon="mdi-plus"
         data-testid="create-project"
-        @click="openCreateProject"
+        @click="openProjectDialog()"
       >
         New Project
       </v-btn>
@@ -316,13 +313,8 @@ onMounted(refreshProjects)
           <span class="text-medium-emphasis">{{ item.description || '—' }}</span>
         </template>
         <template #item.my_role="{ item }">
-          <v-chip
-            v-if="projectsStore.isGlobalAdmin || item.my_role"
-            :color="ROLE_COLORS[projectsStore.isGlobalAdmin ? 'owner' : item.my_role!]"
-            size="small"
-            variant="tonal"
-          >
-            {{ projectsStore.isGlobalAdmin ? 'owner' : item.my_role }}
+          <v-chip v-if="displayRole(item)" :color="ROLE_COLORS[displayRole(item)!]" size="small" variant="tonal">
+            {{ displayRole(item) }}
           </v-chip>
         </template>
         <template #item.actions="{ item }">
@@ -342,7 +334,7 @@ onMounted(refreshProjects)
               size="small"
               variant="text"
               :aria-label="`Edit ${item.name}`"
-              @click="openEditProject(item)"
+              @click="openProjectDialog(item)"
             >
               <v-icon size="18">mdi-pencil-outline</v-icon>
               <v-tooltip activator="parent" location="top">Edit project</v-tooltip>
@@ -487,7 +479,7 @@ onMounted(refreshProjects)
           <h4 class="text-subtitle-1 mb-3">Add member</h4>
           <div class="d-flex ga-3 align-start flex-wrap">
             <v-select
-              v-if="canPickPrincipals"
+              v-if="projectsStore.isGlobalAdmin"
               v-model="principalType"
               :items="[
                 { title: 'User', value: 'user' },
@@ -508,7 +500,7 @@ onMounted(refreshProjects)
               style="min-width: 220px"
             />
             <v-autocomplete
-              v-else-if="canPickPrincipals"
+              v-else-if="projectsStore.isGlobalAdmin"
               v-model="newUserId"
               :items="userItems"
               label="User"
