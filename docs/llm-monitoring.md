@@ -164,6 +164,15 @@ export YAAI_API_KEY=yaam_...
 python scripts/llm_monitoring_example.py --base-url http://localhost:8000/api/v1 --records 1000
 ```
 
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--base-url` | http://localhost:8000/api/v1 | YAAI API base URL |
+| `--api-key` | env `YAAI_API_KEY` | Service account API key |
+| `--records` | 1000 | Records per period (baseline and shifted), 1..50000 |
+| `--model-name` | llm-app-metadata | Model name (reused if visible to the key; otherwise choose another name) |
+| `--version` | v1 | Version label (reused if it exists) |
+| `--seed` | 42 | Random seed for the synthetic data |
+
 It never sends text. Re-running it replaces the reference data and appends more inferences to the same version. `--records` is limited to 1--50,000 because the baseline is uploaded in one request (server default `REFERENCE_DATA_MAX_RECORDS`). The script prints rejected record counts and, if the drift run fails, the error message.
 
 **API key:** with authentication enabled, use an API key of a **service account** (or an owner), because creating a model requires one of those roles; models created by a service account are accessible to it (see [Server setup](server-setup.md#6-authentication)). With `AUTH_ENABLED=false` any value works. Without a key the SDK falls back to Google Application Default Credentials. If the model name already exists but is not visible to the key, the script stops with an actionable message -- pick another `--model-name` or grant the service account access.
