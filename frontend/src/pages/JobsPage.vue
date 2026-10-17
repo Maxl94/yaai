@@ -25,12 +25,9 @@ const projectsStore = useProjectsStore()
 
 const model = ref<Model | null>(null)
 const version = ref<ModelVersion | null>(null)
-// Jobs only reference a model version; on the global page the project is resolved via the accessible models
-const versionProjects = ref<Record<string, string | null | undefined>>({})
 
 function canWriteJob(job: JobConfig): boolean {
-  if (hasRouteParams.value) return projectsStore.canWrite(model.value?.project_id)
-  return projectsStore.canWrite(versionProjects.value[job.model_version_id])
+  return projectsStore.canWrite(job.project_id)
 }
 
 const actionError = ref('')
@@ -225,29 +222,6 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleString()
 }
 
-// Only versions of writable projects are resolved; every other job stays read-only
-async function loadVersionProjects() {
-  await projectsStore.ensureLoaded()
-  if (projectsStore.isGlobalAdmin) return
-  try {
-    const models = await modelsApi.list({ page_size: 100 })
-    const writable = models.filter((m) => projectsStore.canWrite(m.project_id))
-    // The list endpoint omits versions, so each model's details are fetched; one failing model must not drop the rest
-    const details = await Promise.allSettled(writable.map((m) => modelsApi.get(m.id)))
-    const entries: [string, string | null | undefined][] = []
-    details.forEach((result, i) => {
-      if (result.status === 'rejected') {
-        console.error(`Failed to resolve versions of model ${writable[i]!.id}:`, result.reason)
-        return
-      }
-      for (const v of result.value.versions ?? []) entries.push([v.id, writable[i]!.project_id])
-    })
-    versionProjects.value = Object.fromEntries(entries)
-  } catch (error) {
-    console.error('Failed to resolve job permissions:', error)
-  }
-}
-
 async function loadModelVersion() {
   if (!modelId.value || !versionId.value) return
   try {
@@ -264,11 +238,7 @@ async function loadModelVersion() {
 
 onMounted(() => {
   loadJobs()
-  if (hasRouteParams.value) {
-    loadModelVersion()
-  } else {
-    loadVersionProjects()
-  }
+  if (hasRouteParams.value) loadModelVersion()
 })
 </script>
 

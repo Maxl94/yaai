@@ -3,16 +3,16 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import JobsPage from '@/pages/JobsPage.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useProjectsStore } from '@/stores/projects'
 import { jobsApi } from '@/api/jobs'
-import { modelsApi } from '@/api/models'
 import { projectsApi } from '@/api/projects'
 import { createTestVuetify, makeProject, makeUser } from '@/test/helpers'
-import type { JobConfig, Model } from '@/types'
+import type { JobConfig } from '@/types'
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: {} }) }))
 vi.mock('@/api/auth', () => ({ authApi: {} }))
 vi.mock('@/api/projects', () => ({ projectsApi: { list: vi.fn() } }))
-vi.mock('@/api/models', () => ({ modelsApi: { list: vi.fn(), get: vi.fn(), getVersion: vi.fn() } }))
+vi.mock('@/api/models', () => ({ modelsApi: {} }))
 vi.mock('@/api/jobs', () => ({
   jobsApi: { list: vi.fn(), update: vi.fn(), trigger: vi.fn(), backfill: vi.fn(), getHistory: vi.fn() },
 }))
@@ -26,6 +26,8 @@ function makeJob(overrides: Partial<JobConfig>): JobConfig {
   return {
     id: 'j',
     model_version_id: 'v',
+    model_id: 'm',
+    project_id: 'pa',
     name: 'job',
     schedule: '0 2 * * *',
     comparison_type: 'vs_reference',
@@ -37,12 +39,6 @@ function makeJob(overrides: Partial<JobConfig>): JobConfig {
   }
 }
 
-// Mirrors the real API: the list endpoint has no versions, only the model details do
-const model = (id: string, projectId: string) =>
-  ({ id, name: id, project_id: projectId }) as unknown as Model
-const modelDetails = (id: string, projectId: string, versionId: string) =>
-  ({ ...model(id, projectId), versions: [{ id: versionId }] }) as unknown as Model
-
 let wrapper: VueWrapper | null = null
 
 async function mountPage(globalRole: 'owner' | 'viewer') {
@@ -51,6 +47,7 @@ async function mountPage(globalRole: 'owner' | 'viewer') {
   const auth = useAuthStore()
   auth.authConfig = { enabled: true, local_enabled: true, google_oauth_enabled: false, allow_registration: false }
   auth.user = makeUser({ role: globalRole })
+  await useProjectsStore().ensureLoaded()
   wrapper = mount(JobsPage, { global: { plugins: [pinia, createTestVuetify()] }, attachTo: document.body })
   await flushPromises()
 }
@@ -63,16 +60,10 @@ beforeEach(() => {
   vi.mocked(jobsApi.list)
     .mockReset()
     .mockResolvedValue([
-      makeJob({ id: 'ja', name: 'job-a', model_version_id: 'va' }),
-      makeJob({ id: 'jb', name: 'job-b', model_version_id: 'vb' }),
-      makeJob({ id: 'jc', name: 'job-unknown', model_version_id: 'vx' }),
+      makeJob({ id: 'ja', name: 'job-a', project_id: 'pa' }),
+      makeJob({ id: 'jb', name: 'job-b', project_id: 'pb' }),
+      makeJob({ id: 'jc', name: 'job-other', project_id: 'px' }),
     ])
-  vi.mocked(modelsApi.list).mockReset().mockResolvedValue([model('ma', 'pa'), model('mb', 'pb')])
-  vi.mocked(modelsApi.get)
-    .mockReset()
-    .mockImplementation(async (modelId: string) =>
-      modelId === 'ma' ? modelDetails('ma', 'pa', 'va') : modelDetails('mb', 'pb', 'vb'),
-    )
   vi.mocked(jobsApi.trigger).mockReset().mockResolvedValue({} as never)
 })
 
@@ -92,34 +83,10 @@ describe('JobsPage per-job write gating on the global page', () => {
     expect(hasAction('job-b', 'mdi-history')).toBe(true)
   })
 
-  it('keeps jobs with an unresolved project read-only', async () => {
-    await mountPage('viewer')
-    expect(hasAction('job-unknown', 'mdi-play')).toBe(false)
-  })
-
-  it('does not resolve versions of read-only projects', async () => {
-    await mountPage('viewer')
-    expect(modelsApi.get).toHaveBeenCalledTimes(1)
-    expect(modelsApi.get).toHaveBeenCalledWith('ma')
-  })
-
-  it('keeps permissions of other models when one model lookup fails', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.mocked(modelsApi.list).mockResolvedValue([model('ma', 'pa'), model('mc', 'pa')])
-    vi.mocked(modelsApi.get).mockImplementation(async (modelId: string) => {
-      if (modelId === 'mc') throw new Error('boom')
-      return modelDetails('ma', 'pa', 'va')
-    })
-    await mountPage('viewer')
-    expect(hasAction('job-a', 'mdi-play')).toBe(true)
-    expect(hasAction('job-b', 'mdi-play')).toBe(false)
-  })
-
-  it('shows every action to a global owner without resolving projects', async () => {
+  it('shows every action to a global owner', async () => {
     await mountPage('owner')
-    expect(modelsApi.list).not.toHaveBeenCalled()
     expect(hasAction('job-b', 'mdi-play')).toBe(true)
-    expect(hasAction('job-unknown', 'mdi-pencil')).toBe(true)
+    expect(hasAction('job-other', 'mdi-pencil')).toBe(true)
   })
 })
 

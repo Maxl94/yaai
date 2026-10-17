@@ -170,6 +170,8 @@ export interface Inference {
 export interface JobConfig {
   id: string
   model_version_id: string
+  model_id: string
+  project_id: string
   name: string
   schedule: string
   comparison_type: 'vs_reference' | 'rolling_window'
