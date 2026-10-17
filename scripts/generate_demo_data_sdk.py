@@ -5,6 +5,10 @@ Demo Data Generator — SDK version.
 Same as generate_demo_data.py but uses the yaai Python SDK instead of raw
 HTTP calls.  Useful for testing the SDK end-to-end and as a usage example.
 
+Each model gets two versions: v1.0 (all features, full timeline) and v1.1
+(last input feature dropped, only the most recent 3 weeks), so the version
+comparison can be demoed.
+
 Datasets:
   - california_housing : California house price prediction (regression, 8 features, 20k samples)
   - wine               : Wine cultivar classification (3 classes, 13 chemical features)
@@ -51,12 +55,16 @@ BASE_URL = "http://localhost:8000/api/v1"
 # Dataset registry
 # ---------------------------------------------------------------------------
 
+# Every model gets both versions; v1.1 drops the last input feature and only
+# receives data from the most recent weeks (a later rollout), so the version
+# comparison shows a schema diff and overlapping data.
+V2_ROLLOUT_WEEKS = 3
+
 DATASETS = {
     "california_housing": {
         "loader": fetch_california_housing,
         "model_name": "house-price-predictor",
         "description": "Predicts California median house values from census block-group features (income, age, rooms, location).",
-        "version": "v1.0",
         "task": "regression",
         "output_name": "predicted_price",
     },
@@ -64,7 +72,6 @@ DATASETS = {
         "loader": load_wine,
         "model_name": "wine-classifier",
         "description": "Classifies wines into 3 cultivar classes from 13 chemical analysis measurements (alcohol, flavanoids, color, etc.).",
-        "version": "v1.0",
         "task": "classification",
         "output_name": "predicted_cultivar",
     },
@@ -72,7 +79,6 @@ DATASETS = {
         "loader": load_breast_cancer,
         "model_name": "tumor-classifier",
         "description": "Classifies breast tumors as malignant or benign from 30 digitized cell-nucleus measurements.",
-        "version": "v1.0",
         "task": "classification",
         "output_name": "predicted_diagnosis",
     },
@@ -89,13 +95,16 @@ def sanitize_feature_name(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def load_and_train(dataset_key: str):
+def load_and_train(dataset_key: str, drop_last_feature: bool = False):
     """Load a sklearn dataset and train a quick RandomForest model."""
     config = DATASETS[dataset_key]
     data = config["loader"]()
     X, y = data.data, data.target
     feature_names = [sanitize_feature_name(n) for n in data.feature_names]
     target_names = [str(n) for n in data.target_names] if hasattr(data, "target_names") else None
+
+    if drop_last_feature:
+        X, feature_names = X[:, :-1], feature_names[:-1]
 
     if config["task"] == "regression":
         model = RandomForestRegressor(n_estimators=50, random_state=42)
@@ -228,19 +237,24 @@ def _generate_week_records(
 async def generate_dataset(
     client: YaaiClient,
     dataset_key: str,
+    version: str = "v1.0",
+    drop_last_feature: bool = False,
     weeks: int = 8,
     records_per_day: int = 50,
+    inference_weeks: int | None = None,
 ) -> None:
+    """Generate one model version; inferences cover only the last `inference_weeks` of `weeks`."""
     config = DATASETS[dataset_key]
+    first_week = weeks - min(inference_weeks or weeks, weeks)
 
     print(f"\n{'=' * 60}")
-    print(f"  {config['model_name']}  ({config['task']})")
+    print(f"  {config['model_name']} {version}  ({config['task']})")
     print(f"  {config['description']}")
     print(f"{'=' * 60}")
 
     # ---- 1. Load & train ----
     print("\n[1/6] Loading dataset and training model...")
-    X, y, feature_names, target_names, model = load_and_train(dataset_key)
+    X, y, feature_names, target_names, model = load_and_train(dataset_key, drop_last_feature)
     print(f"  Dataset: {X.shape[0]} samples, {X.shape[1]} features")
     print(f"  Model: {type(model).__name__} (50 trees)")
     print(f"  Training score: {model.score(X, y):.4f}")
@@ -265,7 +279,7 @@ async def generate_dataset(
 
     version_obj = await client.create_model_version(
         model_id=api_model.id,
-        version=config["version"],
+        version=version,
         schema_fields=schema,
     )
     version_id = version_obj.id
@@ -302,7 +316,7 @@ async def generate_dataset(
     if len(drift_weeks) == 0 and weeks >= 4:
         drift_weeks.add(int(rng.integers(weeks // 2, weeks)))
 
-    for week in range(weeks):
+    for week in range(first_week, weeks):
         if week in drift_weeks:
             drift_factor = rng.uniform(0.05, max_drift_factor)
         else:
@@ -340,7 +354,7 @@ async def generate_dataset(
     # ---- 6. Summary ----
     print("\n[6/6] Done!")
     print(f"  Reference:  {ref_result.ingested} records")
-    print(f"  Inference:  {total_created} records across {weeks} weeks")
+    print(f"  Inference:  {total_created} records across {weeks - first_week} weeks")
     print(f"  Backfill:   {total_runs} drift runs")
     print(f"  Dashboard:  http://localhost:3000/models/{api_model.id}/versions/{version_id}/dashboard")
 
@@ -385,12 +399,16 @@ async def run(args: argparse.Namespace) -> None:
             datasets = list(DATASETS.keys()) if args.dataset == "all" else [args.dataset]
 
             for ds_key in datasets:
-                await generate_dataset(
-                    client=client,
-                    dataset_key=ds_key,
-                    weeks=args.weeks,
-                    records_per_day=args.records_per_day,
-                )
+                for version, is_latest in (("v1.0", False), ("v1.1", True)):
+                    await generate_dataset(
+                        client=client,
+                        dataset_key=ds_key,
+                        version=version,
+                        drop_last_feature=is_latest,
+                        weeks=args.weeks,
+                        records_per_day=args.records_per_day,
+                        inference_weeks=V2_ROLLOUT_WEEKS if is_latest else None,
+                    )
 
             print(f"\n{'=' * 60}")
             print("All done! View your models at http://localhost:3000/models")
