@@ -6,13 +6,21 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { CategoricalData } from '@/types'
-import { aggregateTopCategories, categoryDisplayName, escapeHtml, isHorizontalLayout } from '@/utils/chartFormat'
+import {
+  DIRECTION_COLORS,
+  aggregateTopCategories,
+  categoryDisplayName,
+  escapeHtml,
+  isHorizontalLayout,
+  type FieldDirection,
+} from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 const props = defineProps<{
   data: CategoricalData
   fieldName: string
+  direction?: FieldDirection
 }>()
 
 const bars = computed(() => aggregateTopCategories(props.data.categories))
@@ -24,6 +32,7 @@ const chartHeight = computed(() => (horizontal.value ? Math.max(200, 40 + bars.v
 const option = computed(() => {
   const items = bars.value
   const isHorizontal = horizontal.value
+  const { base, muted } = DIRECTION_COLORS[props.direction ?? 'input']
 
   const labelAxis = {
     type: 'category',
@@ -62,7 +71,7 @@ const option = computed(() => {
         type: 'bar',
         data: items.map((b) => ({
           value: b.count,
-          itemStyle: { color: b.otherCount ? '#fcd34d' : '#f59e0b' },
+          itemStyle: { color: b.otherCount ? muted : base },
         })),
         barMaxWidth: 28,
       },

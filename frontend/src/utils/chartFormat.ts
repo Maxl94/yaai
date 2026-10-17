@@ -147,3 +147,11 @@ export function aggregateGroupedCategories(
   }
   return bars
 }
+
+export type FieldDirection = 'input' | 'output'
+
+/** Inputs are teal, outputs (predictions) are orange - matching the direction chip's primary/secondary colors. */
+export const DIRECTION_COLORS: Record<FieldDirection, { base: string; muted: string }> = {
+  input: { base: '#0d9488', muted: 'rgba(13, 148, 136, 0.35)' },
+  output: { base: '#f59e0b', muted: 'rgba(245, 158, 11, 0.35)' },
+}

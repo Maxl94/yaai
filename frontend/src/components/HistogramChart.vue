@@ -6,20 +6,19 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { HistogramData } from '@/types'
-import { bucketTooltipTitle, formatBucketLabels } from '@/utils/chartFormat'
+import { DIRECTION_COLORS, bucketTooltipTitle, formatBucketLabels, type FieldDirection } from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 const props = defineProps<{
   data: HistogramData
   fieldName: string
+  direction?: FieldDirection
 }>()
-
-const BAR_COLOR = '#0d9488'
-const OUTLIER_COLOR = 'rgba(13, 148, 136, 0.35)'
 
 const option = computed(() => {
   const buckets = props.data.buckets
+  const { base: BAR_COLOR, muted: OUTLIER_COLOR } = DIRECTION_COLORS[props.direction ?? 'input']
 
   return {
     tooltip: {

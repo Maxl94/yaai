@@ -1,12 +1,15 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import HistogramChart from './HistogramChart.vue'
 import BarChart from './BarChart.vue'
 import StatsSummary from './StatsSummary.vue'
 import type { DashboardPanel, HistogramData, CategoricalData } from '@/types'
 
-defineProps<{
+const props = defineProps<{
   panel: DashboardPanel
 }>()
+
+const fieldDirection = computed(() => (props.panel.direction === 'output' ? 'output' : 'input'))
 
 function isHistogramData(data: HistogramData | CategoricalData): data is HistogramData {
   return 'buckets' in data
@@ -81,6 +84,7 @@ function getDriftStatus(panel: DashboardPanel): { color: string; icon: string; l
           <HistogramChart
             :data="panel.data"
             :field-name="panel.field_name"
+            :direction="fieldDirection"
           />
         </div>
         <div v-else class="empty-chart">
@@ -94,6 +98,7 @@ function getDriftStatus(panel: DashboardPanel): { color: string; icon: string; l
           <BarChart
             :data="panel.data"
             :field-name="panel.field_name"
+            :direction="fieldDirection"
           />
         </div>
         <div v-else class="empty-chart">
