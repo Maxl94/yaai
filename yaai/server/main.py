@@ -29,7 +29,6 @@ from yaai.server.scheduler import (
     load_active_jobs,
     scheduler,
     scheduler_enabled,
-    scheduler_sync_interval_seconds,
     start_job_sync,
 )
 from yaai.server.security_headers import SecurityHeadersMiddleware, security_headers_enabled
@@ -124,7 +123,7 @@ async def lifespan(app: FastAPI):
         logger.info("Loading active jobs ...")
         async with database.async_session() as db:
             await load_active_jobs(db)
-        start_job_sync(scheduler_sync_interval_seconds())
+        start_job_sync()
         scheduler.start()
     else:
         logger.info("SCHEDULER_ENABLED is false — scheduled jobs will not run on this instance.")

@@ -16,6 +16,16 @@ def is_production() -> bool:
     return os.environ.get("ENVIRONMENT", "development").lower() in ("production", "prod")
 
 
+def env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean environment variable (true/1/yes or false/0/no); unset, blank or other values give ``default``."""
+    value = os.environ.get(name, "").strip().lower()
+    if value in ("true", "1", "yes"):
+        return True
+    if value in ("false", "0", "no"):
+        return False
+    return default
+
+
 _INSECURE_SESSION_SECRETS = {"", "dev-session-secret-change-me"}
 
 
@@ -24,10 +34,7 @@ def api_docs_enabled() -> bool:
 
     Controlled by API_DOCS_ENABLED; defaults to enabled outside production and disabled in production.
     """
-    value = os.environ.get("API_DOCS_ENABLED")
-    if value is None or not value.strip():
-        return not is_production()
-    return value.strip().lower() in ("true", "1", "yes")
+    return env_bool("API_DOCS_ENABLED", not is_production())
 
 
 def resolve_session_secret() -> str:

@@ -19,7 +19,6 @@ from yaai.server.scheduler import (
     job_lock_key,
     register_job,
     scheduler_enabled,
-    scheduler_sync_interval_seconds,
     start_job_sync,
     sync_jobs,
     unregister_job,
@@ -328,7 +327,7 @@ class TestSchedulerSync:
         assert [j.id for j in sync_scheduler.get_jobs()] == [str(kept.id)]
 
     async def test_never_removes_the_sync_job(self, db_session, sync_scheduler):
-        start_job_sync(60)
+        start_job_sync()
 
         await sync_jobs(db_session)
 
@@ -349,21 +348,6 @@ class TestSchedulerSync:
             await _run_sync_jobs()
 
         assert "reconciliation failed" in caplog.text
-
-
-class TestSchedulerSyncInterval:
-    def test_default(self, monkeypatch):
-        monkeypatch.delenv("SCHEDULER_SYNC_INTERVAL_SECONDS", raising=False)
-        assert scheduler_sync_interval_seconds() == 60
-
-    def test_custom_value(self, monkeypatch):
-        monkeypatch.setenv("SCHEDULER_SYNC_INTERVAL_SECONDS", "15")
-        assert scheduler_sync_interval_seconds() == 15
-
-    @pytest.mark.parametrize("value", ["abc", "0", "-5", ""])
-    def test_invalid_value_uses_default(self, monkeypatch, value):
-        monkeypatch.setenv("SCHEDULER_SYNC_INTERVAL_SECONDS", value)
-        assert scheduler_sync_interval_seconds() == 60
 
 
 class TestSchedulerEnabled:

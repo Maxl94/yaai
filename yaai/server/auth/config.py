@@ -129,9 +129,6 @@ def load_auth_config() -> AuthConfig:
 _INSECURE_JWT_SECRETS = {"dev-secret-change-me", "changeme", "secret", ""}
 
 
-_is_production = is_production  # backward-compatible alias
-
-
 def _validate_jwt_secret(config: AuthConfig, is_prod: bool) -> None:
     """Validate the JWT secret configuration."""
     jwt_secret = config.jwt.secret.get_secret_value()
@@ -153,7 +150,7 @@ def _validate_jwt_secret(config: AuthConfig, is_prod: bool) -> None:
 
 def validate_auth_config(config: AuthConfig) -> AuthConfig:
     """Validate auth config at startup. Logs warnings in dev, raises in production."""
-    is_prod = _is_production()
+    is_prod = is_production()
 
     if not config.enabled:
         logger.info("Authentication is DISABLED — all endpoints are open")

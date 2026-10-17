@@ -48,7 +48,7 @@ async def list_models(
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    model_ids = await get_accessible_model_ids(identity, db)
+    model_ids = await get_accessible_model_ids(identity)
     svc = ModelService(db)
     summaries, total = await svc.list_models(page, page_size, search, model_ids=model_ids, project_id=project_id)
     return {

@@ -126,7 +126,7 @@ async def test_auth_disabled_grants_everything(world: World):
 
     await check_model_read_access(world.model_b.id, identity, world.db)
     await check_model_write_access(world.model_b.id, identity, world.db)
-    assert await get_accessible_model_ids(identity, world.db) is None
+    assert await get_accessible_model_ids(identity) is None
     assert await get_project_role(identity, world.project_b.id, world.db) == ProjectRole.OWNER
 
 
@@ -145,7 +145,7 @@ async def test_project_role_for_model(world: World):
 
 
 async def _materialize(world: World, identity) -> list | None:
-    query = await get_accessible_model_ids(identity, world.db)
+    query = await get_accessible_model_ids(identity)
     if query is None:
         return None
     return list((await world.db.execute(query)).scalars().all())

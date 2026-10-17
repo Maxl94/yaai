@@ -425,14 +425,10 @@ async def check_version_read_access(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model version not found")
 
 
-async def get_accessible_model_ids(
-    identity: CurrentIdentity,
-    db: AsyncSession,
-) -> Select | None:
+async def get_accessible_model_ids(identity: CurrentIdentity) -> Select | None:
     """Return a subquery of the model IDs the identity may read, or None if no filtering is needed.
 
     Pass the result to ``.in_()``; it is evaluated inside the database, not materialized in Python.
-    ``db`` is unused and only kept for call-site symmetry with the other access helpers.
 
     Global owners (and disabled authentication): None (no filtering).
     Users: models of the projects they are a member of.
