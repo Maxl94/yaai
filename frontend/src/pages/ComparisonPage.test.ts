@@ -12,7 +12,7 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { modelId: 'm1', versionId: 'v2' } }),
 }))
 vi.mock('@/api/models', () => ({
-  modelsApi: { get: vi.fn(), getVersion: vi.fn(), list: vi.fn(), listVersions: vi.fn() },
+  modelsApi: { get: vi.fn(), getVersion: vi.fn(), listAll: vi.fn(), listVersions: vi.fn() },
 }))
 vi.mock('@/api/dashboard', () => ({ dashboardApi: { getComparison: vi.fn() } }))
 
@@ -133,7 +133,7 @@ describe('ComparisonPage', () => {
     vi.clearAllMocks()
     vi.mocked(modelsApi.get).mockResolvedValue({ id: 'm1', name: 'Model' } as never)
     vi.mocked(modelsApi.getVersion).mockResolvedValue({ id: 'v2', version: 'v2' } as never)
-    vi.mocked(modelsApi.list).mockResolvedValue([{ id: 'm1', name: 'Model' }] as never)
+    vi.mocked(modelsApi.listAll).mockResolvedValue([{ id: 'm1', name: 'Model' }] as never)
     vi.mocked(modelsApi.listVersions).mockResolvedValue([
       { id: 'v2', version: 'v2' },
       { id: 'v1', version: 'v1' },
@@ -160,6 +160,35 @@ describe('ComparisonPage', () => {
     })
     expect(params.from_b).toBe(params.from_a)
     expect(params.to_b).toBe(params.to_a)
+  })
+
+  it('restores the time-window baseline after leaving vs_version', async () => {
+    const wrapper = await mountPage()
+    const [, , before] = vi.mocked(dashboardApi.getComparison).mock.calls[0]!
+    await switchToOtherVersion(wrapper)
+    const timeBtn = wrapper.findAll('button').find((b) => b.text() === 'Time Window')!
+    await timeBtn.trigger('click')
+    await flushPromises()
+    const [, , after] = vi.mocked(dashboardApi.getComparison).mock.lastCall!
+    expect(after).toMatchObject({ mode: 'time_window', from_b: (before as { from_b: string }).from_b, to_b: (before as { to_b: string }).to_b })
+  })
+
+  it('ignores out-of-order comparison responses', async () => {
+    const wrapper = await mountPage()
+    const resolvers: Array<(v: never) => void> = []
+    vi.mocked(dashboardApi.getComparison).mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve as never)),
+    )
+    const click = (label: string) => wrapper.findAll('button').find((b) => b.text() === label)!.trigger('click')
+    await click('vs Reference')
+    await click('Time Window')
+    await flushPromises()
+    expect(resolvers).toHaveLength(2)
+    resolvers[1]!({ model_version_id: 'v2', panels: [], schema_diff: [] } as never)
+    await flushPromises()
+    resolvers[0]!({ model_version_id: 'v2', panels: [], schema_diff: [diff] } as never)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Fields not compared')
   })
 
   it('renders schema_diff as fields not compared', async () => {

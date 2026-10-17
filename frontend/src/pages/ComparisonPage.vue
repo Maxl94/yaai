@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { modelsApi } from '@/api/models'
 import { dashboardApi } from '@/api/dashboard'
@@ -30,22 +30,26 @@ const otherModelId = ref<string | null>(null)
 const otherVersions = ref<ModelVersion[]>([])
 const otherVersionId = ref<string | null>(null)
 
-async function selectOtherModel(id: string) {
+// Returns false when a newer model selection superseded this one.
+async function selectOtherModel(id: string): Promise<boolean> {
   otherModelId.value = id
   otherVersionId.value = null
+  let versions: ModelVersion[] = []
   try {
-    otherVersions.value = await modelsApi.listVersions(id)
+    versions = await modelsApi.listVersions(id)
   } catch (error) {
-    otherVersions.value = []
     console.error('Failed to fetch versions:', error)
   }
+  if (otherModelId.value !== id) return false
+  otherVersions.value = versions
   const fallback = otherVersions.value.find((v) => v.id !== versionId.value)
     ?? otherVersions.value.find((v) => v.id === versionId.value)
   otherVersionId.value = fallback?.id ?? null
+  return true
 }
 
 async function onOtherModelChange(id: string) {
-  await selectOtherModel(id)
+  if (!(await selectOtherModel(id))) return
   fetchComparison()
 }
 
@@ -54,16 +58,26 @@ function onOtherVersionChange(id: string) {
   fetchComparison()
 }
 
-watch(mode, async (newMode) => {
+// Time-window baseline, restored when leaving vs_version
+let savedPeriodB: { from: string; to: string } | null = null
+
+watch(mode, async (newMode, oldMode) => {
+  if (oldMode === 'vs_version' && savedPeriodB) {
+    periodB.value = savedPeriodB
+    savedPeriodB = null
+  }
   if (newMode === 'vs_version') {
+    savedPeriodB = { ...periodB.value }
     periodB.value = { ...periodA.value }
     try {
-      if (!allModels.value.length) allModels.value = await modelsApi.list()
+      if (!allModels.value.length) allModels.value = await modelsApi.listAll()
     } catch (error) {
       console.error('Failed to fetch models:', error)
     }
     if (!otherModelId.value) await selectOtherModel(modelId.value)
   }
+  // Let the period watcher run first so fetchComparison cancels its debounce timer
+  await nextTick()
   fetchComparison()
 })
 
@@ -124,8 +138,11 @@ async function fetchModel() {
   }
 }
 
+let latestRequestId = 0
+
 async function fetchComparison() {
   if (debounceTimer) clearTimeout(debounceTimer)
+  const requestId = ++latestRequestId
   if (mode.value === 'vs_version' && (!otherModelId.value || !otherVersionId.value)) {
     panels.value = []
     schemaDiff.value = []
@@ -149,12 +166,16 @@ async function fetchComparison() {
         : { mode: 'vs_reference' as const, ...periodAParams }
 
     const data = await dashboardApi.getComparison(modelId.value, versionId.value, params)
+    if (requestId !== latestRequestId) return
     panels.value = data.panels
     schemaDiff.value = data.schema_diff
   } catch (error) {
     console.error('Failed to fetch comparison:', error)
+    if (requestId !== latestRequestId) return
+    panels.value = []
+    schemaDiff.value = []
   } finally {
-    loading.value = false
+    if (requestId === latestRequestId) loading.value = false
   }
 }
 
