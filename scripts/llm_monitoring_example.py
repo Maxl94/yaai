@@ -35,6 +35,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
+from llm_reporter_example import estimate_cost_usd  # sibling script, found via sys.path[0] when run directly
 
 from yaai import YaaiClient
 from yaai.schemas.model import DataType, FieldDirection, ModelRead, SchemaFieldCreate
@@ -45,13 +46,6 @@ DEFAULT_VERSION = "v1"
 BATCH_SIZE = 1000
 # Matches the server default of REFERENCE_DATA_MAX_RECORDS; the baseline is uploaded in a single request.
 MAX_RECORDS = 50_000
-
-# Illustrative USD prices per 1M tokens as (input, output). Not real prices -- maintain your own table.
-PRICE_PER_1M_TOKENS: dict[str, tuple[float, float]] = {
-    "gemini-2.5-flash-lite": (0.10, 0.40),
-    "gemini-2.5-flash": (0.30, 2.50),
-    "gemini-2.5-pro": (1.25, 10.00),
-}
 
 # Relative speed per model (output tokens per second) used by the synthetic generator.
 _TOKENS_PER_SECOND: dict[str, float] = {
@@ -128,24 +122,6 @@ _PROFILES: dict[str, dict] = {
         "finish_weights": [0.75, 0.2, 0.05],
     },
 }
-
-
-def estimate_cost_usd(llm_model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    """Compute the cost of one call from token counts and the price table.
-
-    Args:
-        llm_model: Model name, must be a key of ``PRICE_PER_1M_TOKENS``.
-        prompt_tokens: Number of input tokens.
-        completion_tokens: Number of output tokens.
-
-    Returns:
-        Cost in USD rounded to 8 decimals.
-
-    Raises:
-        KeyError: If the model has no entry in the price table.
-    """
-    price_in, price_out = PRICE_PER_1M_TOKENS[llm_model]
-    return round((prompt_tokens * price_in + completion_tokens * price_out) / 1_000_000, 8)
 
 
 def _generate_record(rng: random.Random, profile: dict, timestamp: datetime | None) -> dict:

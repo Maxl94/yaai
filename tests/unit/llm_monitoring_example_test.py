@@ -3,6 +3,7 @@
 import importlib.util
 import random
 import statistics
+import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,6 +18,7 @@ from yaai.server.drift.registry import METRIC_REGISTRY
 from yaai.server.services.schema_helpers import validate_record
 
 _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "llm_monitoring_example.py"
+sys.path.insert(0, str(_SCRIPT.parent))  # the demo imports its sibling script
 _spec = importlib.util.spec_from_file_location("llm_monitoring_example", _SCRIPT)
 example = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(example)
@@ -62,19 +64,6 @@ class TestSchemaFields:
     def test_job_settings_use_valid_values(self):
         assert example.JOB_SETTINGS["comparison_type"] in {"vs_reference", "rolling_window"}
         assert len(str(example.JOB_SETTINGS["schedule"]).split()) == 5
-
-
-class TestEstimateCost:
-    def test_uses_price_table(self):
-        # flash: 0.30 in / 2.50 out per 1M tokens
-        assert example.estimate_cost_usd("gemini-2.5-flash", 1_000_000, 1_000_000) == pytest.approx(2.80)
-
-    def test_zero_tokens_cost_nothing(self):
-        assert example.estimate_cost_usd("gemini-2.5-pro", 0, 0) == 0.0
-
-    def test_unknown_model_raises(self):
-        with pytest.raises(KeyError):
-            example.estimate_cost_usd("unknown-model", 10, 10)
 
 
 class TestGenerateCallMetadata:
