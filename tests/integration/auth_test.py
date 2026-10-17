@@ -270,6 +270,13 @@ async def test_rotated_refresh_token_rejected_after_grace_window(
     auth_client.cookies.clear()
     assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(old))).status_code == 401
 
+    # The next rotation purges expired rows
+    fresh = await _login_cookie(auth_client)
+    assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(fresh))).status_code == 200
+    db_session.expire_all()
+    expired = select(RefreshToken).where(RefreshToken.expires_at <= datetime.now(UTC))
+    assert (await db_session.execute(expired)).scalars().all() == []
+
 
 async def test_refresh_without_cookie_fails(auth_client: AsyncClient):
     resp = await auth_client.post("/api/v1/auth/refresh")

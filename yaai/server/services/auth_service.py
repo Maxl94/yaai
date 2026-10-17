@@ -178,9 +178,12 @@ class AuthService:
 
     async def rotate_refresh_token(self, jti: str) -> None:
         """Shorten a refresh token's lifetime to the rotation grace window (never extends it)."""
-        grace_end = datetime.now(UTC) + timedelta(seconds=ROTATION_GRACE_SECONDS)
+        now = datetime.now(UTC)
+        grace_end = now + timedelta(seconds=ROTATION_GRACE_SECONDS)
         expires_at = case((RefreshToken.expires_at > grace_end, grace_end), else_=RefreshToken.expires_at)
         await self.db.execute(update(RefreshToken).where(RefreshToken.jti == jti).values(expires_at=expires_at))
+        # Rotated rows are kept for the grace window instead of deleted, so purge expired ones here
+        await self.db.execute(delete(RefreshToken).where(RefreshToken.expires_at <= now))
         await self.db.commit()
 
     async def revoke_all_user_tokens(self, user_id: uuid.UUID) -> None:
