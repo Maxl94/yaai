@@ -34,7 +34,7 @@ server = [
     "scikit-learn>=1.6.0",
     "scipy>=1.17.0",
     "slowapi>=0.1.9",
-    "sqlalchemy>=2.0.46",
+    "sqlalchemy[asyncio]>=2.0.46",
     "uvicorn>=0.40.0",
 ]
 
@@ -78,6 +78,7 @@ lint.select = [
 lint.ignore = [
     "E501",    # Ignore long lines (handled by formatter)
     "PLR0913", # Too many function arguments (sometimes necessary)
+    "PLR0917", # Too many positional arguments (FastAPI handlers, consistent with PLR0913)
     "B008",    # Function calls in argument defaults (can be intentional)
     "D100",    # Missing docstring in public module
     "D104",    # Missing docstring in public package
@@ -131,7 +132,6 @@ pythonpath = ["."]
 dev = [
     "yaai-monitoring[server]",
     "aiosqlite>=0.22.1",
-    "greenlet>=3.3.1",
     "ipython>=9.10.0",
     "jupyter>=1.1.1",
     "matplotlib>=3.10.8",

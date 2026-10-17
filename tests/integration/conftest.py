@@ -101,7 +101,7 @@ def pg_sync_url(pg_container) -> str:
     user = pg_container.username
     password = pg_container.password
     dbname = pg_container.dbname
-    return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
 
 
 @pytest.fixture(scope="session")

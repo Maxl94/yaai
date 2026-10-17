@@ -57,6 +57,7 @@ import asyncio
 from yaai import YaaiClient
 from yaai.schemas.model import SchemaFieldCreate
 
+
 async def main():
     async with YaaiClient("http://localhost:8000/api/v1", api_key="yaam_...") as client:
         model = await client.create_model("fraud-detector")
@@ -76,6 +77,7 @@ async def main():
                 {"inputs": {"amount": 9001.0, "country": "NG"}, "outputs": {"is_fraud": "true"}},
             ],
         )
+
 
 asyncio.run(main())
 ```
