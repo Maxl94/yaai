@@ -5,6 +5,9 @@ login, token refresh, logout, user CRUD, service accounts, and model access.
 """
 
 import uuid
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -23,13 +26,14 @@ from yaai.server.auth.dependencies import (
 )
 from yaai.server.auth.jwt import create_access_token
 from yaai.server.auth.passwords import hash_password
+from yaai.server.config import settings
 from yaai.server.database import Base, get_db
 from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models import inference as _inference_models  # noqa: F401
 from yaai.server.models import job as _job_models  # noqa: F401
 from yaai.server.models import model as _model_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, RefreshToken, User, UserRole
-from yaai.server.services.auth_service import AuthService
+from yaai.server.services.auth_service import ROTATION_GRACE_SECONDS, AuthService
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -178,10 +182,29 @@ async def test_login_success(auth_client: AsyncClient, seeded_owner: User):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert "access_token" in data
-    assert "refresh_token" in data
+    assert "refresh_token" not in data
     assert data["token_type"] == "bearer"  # noqa: S105
     assert data["user"]["username"] == "admin"
     assert data["user"]["role"] == "owner"
+
+
+async def test_login_cookie_is_secure_on_https_base_url(auth_client: AsyncClient, seeded_owner: User):
+    with patch.object(settings, "base_url", "https://yaai.example.com"):
+        resp = await auth_client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"}
+        )
+    assert "secure" in resp.headers["set-cookie"].lower()
+
+
+async def test_login_sets_httponly_refresh_cookie(auth_client: AsyncClient, seeded_owner: User):
+    resp = await auth_client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"})
+    cookie = resp.headers["set-cookie"].lower()
+    assert cookie.startswith("yaai_refresh=")
+    assert "httponly" in cookie
+    assert "samesite=lax" in cookie
+    assert "path=/api/v1/auth" in cookie
+    assert f"max-age={30 * 86400}" in cookie
+    assert "secure" not in cookie  # test base_url is plain http
 
 
 async def test_login_wrong_password(auth_client: AsyncClient, seeded_owner: User):
@@ -203,81 +226,137 @@ async def test_login_unknown_user(auth_client: AsyncClient):
 # Token Refresh
 
 
-async def test_refresh_token_success(auth_client: AsyncClient, seeded_owner: User):
-    # Login first to get tokens
-    login_resp = await auth_client.post(
-        "/api/v1/auth/login",
-        json={"username": "admin", "password": "admin-password-123"},
-    )
-    tokens = login_resp.json()["data"]
+async def _login_cookie(client: AsyncClient) -> str:
+    """Log in and return the refresh cookie value; the client cookie jar is cleared so tests set it explicitly."""
+    resp = await client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"})
+    assert resp.status_code == 200
+    token = client.cookies.get("yaai_refresh")
+    client.cookies.clear()
+    return token
 
-    # Refresh
-    resp = await auth_client.post(
-        "/api/v1/auth/refresh",
-        json={"refresh_token": tokens["refresh_token"]},
-    )
+
+def _cookie(token: str) -> dict[str, str]:
+    return {"Cookie": f"yaai_refresh={token}"}
+
+
+async def test_refresh_token_success(auth_client: AsyncClient, seeded_owner: User):
+    old = await _login_cookie(auth_client)
+
+    resp = await auth_client.post("/api/v1/auth/refresh", headers=_cookie(old))
     assert resp.status_code == 200
     new_tokens = resp.json()["data"]
     assert "access_token" in new_tokens
-    assert "refresh_token" in new_tokens
-    # Old refresh token should be revoked — using it again should fail
-    resp2 = await auth_client.post(
-        "/api/v1/auth/refresh",
-        json={"refresh_token": tokens["refresh_token"]},
-    )
-    assert resp2.status_code == 401
+    assert "refresh_token" not in new_tokens
+    rotated = auth_client.cookies.get("yaai_refresh")
+    assert rotated and rotated != old
+
+    # A racing reload or second tab may still present the just-rotated token within the grace window
+    auth_client.cookies.clear()
+    assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(old))).status_code == 200
+
+
+async def test_rotated_refresh_token_rejected_after_grace_window(
+    auth_client: AsyncClient, seeded_owner: User, db_session: AsyncSession
+):
+    old = await _login_cookie(auth_client)
+    assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(old))).status_code == 200
+
+    row = (await db_session.execute(select(RefreshToken).order_by(RefreshToken.created_at))).scalars().first()
+    remaining = row.expires_at.replace(tzinfo=UTC) - datetime.now(UTC)
+    assert timedelta(0) < remaining <= timedelta(seconds=ROTATION_GRACE_SECONDS)
+
+    row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+    auth_client.cookies.clear()
+    assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(old))).status_code == 401
+
+    # The next rotation purges expired rows
+    fresh = await _login_cookie(auth_client)
+    assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(fresh))).status_code == 200
+    db_session.expire_all()
+    expired = select(RefreshToken).where(RefreshToken.expires_at <= datetime.now(UTC))
+    assert (await db_session.execute(expired)).scalars().all() == []
+
+
+async def test_refresh_without_cookie_fails(auth_client: AsyncClient):
+    resp = await auth_client.post("/api/v1/auth/refresh")
+    assert resp.status_code == 401
+
+
+async def test_refresh_ignores_token_in_body(auth_client: AsyncClient, seeded_owner: User):
+    token = await _login_cookie(auth_client)
+    resp = await auth_client.post("/api/v1/auth/refresh", json={"refresh_token": token})
+    assert resp.status_code == 401
 
 
 async def test_refresh_with_access_token_fails(auth_client: AsyncClient, seeded_owner: User):
     """Using an access token as a refresh token should fail."""
     token = create_access_token(AUTH_CONFIG, str(seeded_owner.id), "owner")
-    resp = await auth_client.post(
-        "/api/v1/auth/refresh",
-        json={"refresh_token": token},
-    )
+    resp = await auth_client.post("/api/v1/auth/refresh", headers=_cookie(token))
     assert resp.status_code == 401
+    assert "set-cookie" not in resp.headers
 
 
 async def test_refresh_with_garbage_token_fails(auth_client: AsyncClient):
-    resp = await auth_client.post(
-        "/api/v1/auth/refresh",
-        json={"refresh_token": "not-a-jwt"},
-    )
+    resp = await auth_client.post("/api/v1/auth/refresh", headers=_cookie("not-a-jwt"))
     assert resp.status_code == 401
+    assert "set-cookie" not in resp.headers
 
 
 # Logout
 
 
-async def test_logout_revokes_refresh_token(auth_client: AsyncClient, seeded_owner: User):
-    login_resp = await auth_client.post(
-        "/api/v1/auth/login",
-        json={"username": "admin", "password": "admin-password-123"},
-    )
-    tokens = login_resp.json()["data"]
+async def test_logout_revokes_refresh_token_and_clears_cookie(auth_client: AsyncClient, seeded_owner: User):
+    token = await _login_cookie(auth_client)
 
-    # Logout
-    resp = await auth_client.post(
-        "/api/v1/auth/logout",
-        json={"refresh_token": tokens["refresh_token"]},
-    )
+    resp = await auth_client.post("/api/v1/auth/logout", headers=_cookie(token))
     assert resp.status_code == 200
+    assert 'yaai_refresh=""' in resp.headers["set-cookie"]
+    assert "max-age=0" in resp.headers["set-cookie"].lower()
 
-    # Refresh should now fail
-    resp2 = await auth_client.post(
-        "/api/v1/auth/refresh",
-        json={"refresh_token": tokens["refresh_token"]},
+    # Refresh should now fail even if the cookie is replayed
+    assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(token))).status_code == 401
+
+
+async def test_logout_without_or_with_invalid_cookie_succeeds(auth_client: AsyncClient):
+    assert (await auth_client.post("/api/v1/auth/logout")).status_code == 200
+    assert (await auth_client.post("/api/v1/auth/logout", headers=_cookie("garbage"))).status_code == 200
+
+
+# Google OAuth callback
+
+
+async def test_google_callback_sets_refresh_cookie_and_redirects_to_root(auth_client: AsyncClient):
+    google_config = AuthConfig(
+        enabled=True,
+        jwt=AUTH_CONFIG.jwt,
+        local=AUTH_CONFIG.local,
+        oauth=OAuthConfig(google=GoogleOAuthConfig(enabled=True)),
     )
-    assert resp2.status_code == 401
-
-
-async def test_logout_with_invalid_token_succeeds(auth_client: AsyncClient):
-    """Logout with garbage token should still return 200 (already logged out)."""
-    resp = await auth_client.post(
-        "/api/v1/auth/logout",
-        json={"refresh_token": "garbage"},
+    set_auth_config(google_config)
+    oauth = SimpleNamespace(
+        google=SimpleNamespace(
+            authorize_access_token=AsyncMock(
+                return_value={"userinfo": {"email": "g@example.com", "sub": "google-sub-1", "name": "G"}}
+            )
+        )
     )
-    assert resp.status_code == 200
+
+    with patch("yaai.server.routers.auth.get_oauth", return_value=oauth):
+        resp = await auth_client.get("/api/v1/auth/oauth/google/callback", follow_redirects=False)
+
+    assert resp.status_code in (302, 307)
+    assert resp.headers["location"] == "http://localhost:8000/"
+    assert "httponly" in resp.headers["set-cookie"].lower()
+
+    refresh = await auth_client.post("/api/v1/auth/refresh")
+    assert refresh.status_code == 200
+    assert refresh.json()["data"]["user"]["email"] == "g@example.com"
+
+
+async def test_oauth_exchange_endpoint_removed(auth_client: AsyncClient):
+    resp = await auth_client.post("/api/v1/auth/oauth/exchange", json={"code": "x"})
+    assert resp.status_code in (404, 405)
 
 
 # Get Current User
@@ -679,24 +758,22 @@ async def test_token_with_malformed_subject_rejected(auth_client: AsyncClient):
 async def test_refresh_rejected_for_deactivated_user(
     owner_client: AsyncClient, auth_client: AsyncClient, seeded_viewer: User
 ):
-    login = await auth_client.post("/api/v1/auth/login", json={"username": "viewer", "password": "viewer-password-123"})
-    refresh = login.json()["data"]["refresh_token"]
+    await auth_client.post("/api/v1/auth/login", json={"username": "viewer", "password": "viewer-password-123"})
 
     await owner_client.put(f"/api/v1/auth/users/{seeded_viewer.id}", json={"is_active": False})
 
-    resp = await auth_client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+    resp = await auth_client.post("/api/v1/auth/refresh")
     assert resp.status_code == 401
 
 
 async def test_refresh_issues_token_with_current_role(
     owner_client: AsyncClient, auth_client: AsyncClient, seeded_viewer: User
 ):
-    login = await auth_client.post("/api/v1/auth/login", json={"username": "viewer", "password": "viewer-password-123"})
-    refresh = login.json()["data"]["refresh_token"]
+    await auth_client.post("/api/v1/auth/login", json={"username": "viewer", "password": "viewer-password-123"})
 
     await owner_client.put(f"/api/v1/auth/users/{seeded_viewer.id}", json={"role": "owner"})
 
-    resp = await auth_client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+    resp = await auth_client.post("/api/v1/auth/refresh")
     assert resp.status_code == 200
     assert resp.json()["data"]["user"]["role"] == "owner"
 
@@ -708,6 +785,7 @@ async def test_change_password_revokes_refresh_tokens(auth_client: AsyncClient, 
     login = await auth_client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"})
     tokens = login.json()["data"]
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    cookie = auth_client.cookies.get("yaai_refresh")
 
     resp = await auth_client.put(
         "/api/v1/auth/me/password",
@@ -716,7 +794,9 @@ async def test_change_password_revokes_refresh_tokens(auth_client: AsyncClient, 
     )
     assert resp.status_code == 200
 
-    refresh = await auth_client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert 'yaai_refresh=""' in resp.headers["set-cookie"]
+
+    refresh = await auth_client.post("/api/v1/auth/refresh", headers=_cookie(cookie))
     assert refresh.status_code == 401
 
 
