@@ -71,7 +71,7 @@ Secrets, bootstrap admin password, security headers, rate limiting and scheduler
 > [!TIP]
 > **Simplified configuration** — Several settings are now auto-derived to reduce configuration burden:
 >
-> - **Sync DB URL** — derived from `DATABASE_URL` (strips `+asyncpg` driver)
+> - **Sync DB URL** — derived from `DATABASE_URL` (replaces `+asyncpg` with `+psycopg2` driver)
 > - **Local auth** — enabled automatically unless Google OAuth is configured
 > - **CORS origins** — defaults to `BASE_URL`
 > - **SA audience** — defaults to `BASE_URL`
