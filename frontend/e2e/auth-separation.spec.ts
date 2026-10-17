@@ -97,6 +97,35 @@ test.describe('Owner UI', () => {
     // Verify the model card is gone from the list
     await expect(card).not.toBeVisible({ timeout: 10000 })
   })
+
+  test('owner sees all projects and can create a project', async ({ page }) => {
+    const projectName = `e2e-project-${Date.now()}`
+
+    await page.getByRole('link', { name: /projects/i }).click()
+    await expect(page.locator('h1')).toContainText('Projects', { timeout: 10000 })
+    await expect(page.getByRole('cell', { name: seed.other_project.name, exact: true })).toBeVisible({ timeout: 10000 })
+
+    await page.getByTestId('create-project').click()
+    await page.getByLabel('Project Name').fill(projectName)
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+
+    await expect(page.getByRole('cell', { name: projectName, exact: true })).toBeVisible({ timeout: 10000 })
+  })
+
+  test('project switcher filters the model list', async ({ page }) => {
+    await expect(page.getByText(seed.model_a.name)).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText(seed.hidden_model.name)).toBeVisible()
+
+    await page.getByTestId('project-switcher').click()
+    await page.getByRole('option', { name: seed.other_project.name, exact: true }).click()
+    await expect(page.getByText(seed.hidden_model.name)).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText(seed.model_a.name)).toHaveCount(0)
+
+    await page.getByTestId('project-switcher').click()
+    await page.getByRole('option', { name: 'default', exact: true }).click()
+    await expect(page.getByText(seed.model_a.name)).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText(seed.hidden_model.name)).toHaveCount(0)
+  })
 })
 
 // Viewer UI
@@ -139,5 +168,27 @@ test.describe('Viewer UI', () => {
   test('viewer does not see New Model button', async ({ page }) => {
     await expect(page.getByText(seed.model_a.name)).toBeVisible({ timeout: 10000 })
     await expect(page.getByRole('button', { name: /new model/i })).toHaveCount(0)
+  })
+
+  test('viewer does not see models of projects without membership', async ({ page }) => {
+    await expect(page.getByText(seed.model_a.name)).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText(seed.hidden_model.name)).toHaveCount(0)
+
+    // The viewer only belongs to the default project, so there is nothing to filter by
+    await expect(page.getByTestId('project-switcher')).toHaveCount(0)
+  })
+
+  test('viewer cannot open a model of a foreign project', async ({ page }) => {
+    await page.goto(`/models/${seed.hidden_model.id}`, { waitUntil: 'networkidle' })
+    await expect(page.getByText('Model not found')).toBeVisible({ timeout: 10000 })
+  })
+
+  test('viewer sees projects read-only', async ({ page }) => {
+    await page.getByRole('link', { name: /projects/i }).click()
+    await expect(page.locator('h1')).toContainText('Projects', { timeout: 10000 })
+    await expect(page.getByRole('cell', { name: 'default' }).first()).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('cell', { name: seed.other_project.name, exact: true })).toHaveCount(0)
+    await expect(page.getByTestId('create-project')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^(Members of|Edit|Delete) / })).toHaveCount(0)
   })
 })

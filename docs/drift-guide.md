@@ -187,7 +187,7 @@ The built-in drift metrics work on numerical and categorical distributions. If y
 | Audio model | Duration, sample rate, SNR + prediction |
 | LLM / text model | Prompt length, token count, latency + completion length |
 
-These extracted features are standard numerical and categorical values, so all drift metrics and dashboards work out of the box.
+These extracted features are standard numerical and categorical values, so all drift metrics and dashboards work out of the box. For a complete LLM schema, thresholds and a runnable example, see [LLM & Agent Monitoring](llm-monitoring.md).
 
 ```json
 {

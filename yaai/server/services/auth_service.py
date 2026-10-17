@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,9 @@ from yaai.server.models.auth import APIKey, AuthProvider, RefreshToken, ServiceA
 # Pre-computed bcrypt hash for timing-attack mitigation in authenticate_local().
 # This ensures non-existent user lookups take the same time as real ones.
 _DUMMY_HASH = "$2b$12$tGcQ/cij2YhgRoc0dzhb3eiC/yDPaI3oMdk270Q88g.twJZ5SA8j."
+
+# A rotated refresh token stays valid this long so a reload or second tab racing the rotation is not logged out
+ROTATION_GRACE_SECONDS = 30
 
 
 class AuthService:
@@ -111,6 +114,9 @@ class AuthService:
         if user is None:
             return None
         was_active = user.is_active
+        new_role = kwargs.get("role")
+        if (kwargs.get("is_active") is False) or (new_role is not None and UserRole(new_role) != UserRole.OWNER):
+            await self._ensure_other_active_owner(user)
         for key, value in kwargs.items():
             if key not in self._UPDATABLE_USER_FIELDS:
                 continue
@@ -132,12 +138,27 @@ class AuthService:
         user = await self.get_user_by_id(user_id)
         if user is None:
             return False
+        await self._ensure_other_active_owner(user)
         await self.db.delete(user)
         await self.db.commit()
         return True
 
+    async def _ensure_other_active_owner(self, user: User) -> None:
+        """Raise 409 if the user is the last active owner (no other active owner would remain)."""
+        if user.role != UserRole.OWNER or not user.is_active:
+            return
+        stmt = (
+            select(func.count())
+            .select_from(User)
+            .where(User.role == UserRole.OWNER, User.is_active.is_(True), User.id != user.id)
+        )
+        if (await self.db.execute(stmt)).scalar_one() == 0:
+            raise HTTPException(status_code=409, detail="At least one active owner is required")
+
     async def change_password(self, user: User, new_password: str) -> User:
+        """Set a new password and revoke all of the user's refresh tokens in a single transaction."""
         user.hashed_password = hash_password(new_password)
+        await self.db.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
         await self.db.commit()
         await self.db.refresh(user)
         return user
@@ -146,13 +167,23 @@ class AuthService:
 
     async def validate_refresh_token(self, jti: str) -> RefreshToken | None:
         """Look up a refresh token by JTI. Returns None if not found (revoked or expired)."""
-        stmt = select(RefreshToken).where(RefreshToken.jti == jti)
+        stmt = select(RefreshToken).where(RefreshToken.jti == jti, RefreshToken.expires_at > datetime.now(UTC))
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
     async def revoke_refresh_token(self, jti: str) -> None:
         """Revoke a single refresh token by deleting its DB row."""
         await self.db.execute(delete(RefreshToken).where(RefreshToken.jti == jti))
+        await self.db.commit()
+
+    async def rotate_refresh_token(self, jti: str) -> None:
+        """Shorten a refresh token's lifetime to the rotation grace window (never extends it)."""
+        now = datetime.now(UTC)
+        grace_end = now + timedelta(seconds=ROTATION_GRACE_SECONDS)
+        expires_at = case((RefreshToken.expires_at > grace_end, grace_end), else_=RefreshToken.expires_at)
+        await self.db.execute(update(RefreshToken).where(RefreshToken.jti == jti).values(expires_at=expires_at))
+        # Rotated rows are kept for the grace window instead of deleted, so purge expired ones here
+        await self.db.execute(delete(RefreshToken).where(RefreshToken.expires_at <= now))
         await self.db.commit()
 
     async def revoke_all_user_tokens(self, user_id: uuid.UUID) -> None:

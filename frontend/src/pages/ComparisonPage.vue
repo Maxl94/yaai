@@ -18,6 +18,7 @@ const model = ref<Model | null>(null)
 const version = ref<ModelVersion | null>(null)
 const panels = ref<ComparisonPanel[]>([])
 const loading = ref(true)
+const logScale = ref(false)
 
 // Comparison mode
 const mode = ref<'time_window' | 'vs_reference'>('time_window')
@@ -145,10 +146,13 @@ onMounted(async () => {
     <!-- Controls -->
     <v-card class="mb-4 controls-card" variant="flat">
       <v-card-text>
-        <v-btn-toggle v-model="mode" mandatory color="primary" class="mb-4" density="comfortable">
-          <v-btn value="time_window">Time Window</v-btn>
-          <v-btn value="vs_reference">vs Reference</v-btn>
-        </v-btn-toggle>
+        <div class="d-flex align-center flex-wrap ga-4 mb-4">
+          <v-btn-toggle v-model="mode" mandatory color="primary" density="comfortable">
+            <v-btn value="time_window">Time Window</v-btn>
+            <v-btn value="vs_reference">vs Reference</v-btn>
+          </v-btn-toggle>
+          <v-switch v-model="logScale" label="Log scale" color="primary" density="compact" hide-details />
+        </div>
 
         <div class="mb-4" v-if="mode === 'time_window'">
           <span class="text-subtitle-2 mr-2">Presets:</span>
@@ -211,6 +215,7 @@ onMounted(async () => {
                 :data-a="panel.data_a"
                 :data-b="panel.data_b as HistogramData"
                 :field-name="panel.field_name"
+                :log-scale="logScale"
                 label-a="Period A"
                 :label-b="mode === 'vs_reference' ? 'Reference' : 'Period B'"
               />
@@ -220,6 +225,7 @@ onMounted(async () => {
                 :data-a="panel.data_a"
                 :data-b="panel.data_b as CategoricalData"
                 :field-name="panel.field_name"
+                :log-scale="logScale"
                 label-a="Period A"
                 :label-b="mode === 'vs_reference' ? 'Reference' : 'Period B'"
               />

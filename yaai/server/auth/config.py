@@ -1,13 +1,12 @@
 """Auth configuration loaded from environment variables via Pydantic BaseSettings."""
 
 import logging
-import os
 import secrets as _secrets
 
 from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from yaai.server.config import settings
+from yaai.server.config import is_production, settings
 
 logger = logging.getLogger(__name__)
 
@@ -130,36 +129,28 @@ def load_auth_config() -> AuthConfig:
 _INSECURE_JWT_SECRETS = {"dev-secret-change-me", "changeme", "secret", ""}
 
 
-def _is_production() -> bool:
-    """Heuristic: production if ENVIRONMENT is set to 'production' or 'prod'."""
-    env = os.environ.get("ENVIRONMENT", "development").lower()
-    return env in ("production", "prod")
-
-
 def _validate_jwt_secret(config: AuthConfig, is_prod: bool) -> None:
     """Validate the JWT secret configuration."""
     jwt_secret = config.jwt.secret.get_secret_value()
     if jwt_secret not in _INSECURE_JWT_SECRETS:
         return
 
-    # Always auto-generate a strong secret when unset or insecure
-    config.jwt.secret = SecretStr(_secrets.token_urlsafe(32))
     if is_prod:
-        logger.warning(
-            "AUTH_JWT_SECRET not configured — generated ephemeral secret. "
-            "User sessions will NOT survive server restarts. "
-            "Set AUTH_JWT_SECRET for persistence (e.g. openssl rand -base64 32)."
+        raise RuntimeError(
+            "FATAL: AUTH_JWT_SECRET must be set in production; multiple instances and restarts need a shared "
+            "secret. Generate one with: openssl rand -base64 32"
         )
-    else:
-        logger.warning(
-            "AUTH_JWT_SECRET not configured — generated ephemeral secret. "
-            "Sessions will NOT survive restarts. Set AUTH_JWT_SECRET for persistence."
-        )
+
+    config.jwt.secret = SecretStr(_secrets.token_urlsafe(32))
+    logger.warning(
+        "AUTH_JWT_SECRET not configured — generated ephemeral secret. "
+        "Sessions will NOT survive restarts. Set AUTH_JWT_SECRET for persistence."
+    )
 
 
 def validate_auth_config(config: AuthConfig) -> AuthConfig:
     """Validate auth config at startup. Logs warnings in dev, raises in production."""
-    is_prod = _is_production()
+    is_prod = is_production()
 
     if not config.enabled:
         logger.info("Authentication is DISABLED — all endpoints are open")

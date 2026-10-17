@@ -6,6 +6,15 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { CategoricalData } from '@/types'
+import {
+  aggregateGroupedCategories,
+  categoryDisplayName,
+  countAxis,
+  countBarStyle,
+  escapeHtml,
+  isHorizontalLayout,
+  plotCount,
+} from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -15,65 +24,76 @@ const props = defineProps<{
   fieldName: string
   labelA?: string
   labelB?: string
+  logScale?: boolean
 }>()
 
-const option = computed(() => {
-  // Combine categories from both datasets
-  const allCategories = new Set([
-    ...props.dataA.categories.map((c) => c.value),
-    ...props.dataB.categories.map((c) => c.value),
-  ])
-  const categories = Array.from(allCategories).slice(0, 10)
+const bars = computed(() => aggregateGroupedCategories(props.dataA.categories, props.dataB.categories))
+const horizontal = computed(() => isHorizontalLayout(bars.value.map((b) => b.label)))
 
-  const getCount = (data: CategoricalData, cat: string) => {
-    return data.categories.find((c) => c.value === cat)?.count || 0
+// Horizontal layout needs ~30px per category (two bars); vertical keeps the compact default.
+const chartHeight = computed(() => (horizontal.value ? Math.max(220, 60 + bars.value.length * 30) : 220))
+
+type TooltipItem = { seriesName: string; value: number | null; marker: string; dataIndex: number }
+
+const option = computed(() => {
+  const items = bars.value
+  const isHorizontal = horizontal.value
+  const nameA = props.labelA || 'Period A'
+  const nameB = props.labelB || 'Period B'
+
+  const labelAxis = {
+    type: 'category',
+    data: items.map((b) => b.label),
+    inverse: isHorizontal,
+    axisLabel: {
+      fontSize: 10,
+      interval: 0,
+      overflow: 'truncate',
+      width: isHorizontal ? 90 : 60,
+    },
   }
+  const valueAxis = countAxis(props.logScale)
 
   return {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      formatter: (params: TooltipItem[]) => {
+        const bar = items[params[0]?.dataIndex ?? 0]
+        if (!bar) return ''
+        const rows = params.map((p) => `${p.marker} ${escapeHtml(p.seriesName)}: ${p.value ?? 0}`)
+        return [escapeHtml(categoryDisplayName(bar.label, bar.otherCount)), ...rows].join('<br/>')
+      },
     },
     legend: {
-      data: [props.labelA || 'Period A', props.labelB || 'Period B'],
+      data: [nameA, nameB],
       top: 0,
     },
     grid: {
       left: '3%',
-      right: '4%',
+      right: '6%',
       bottom: '3%',
       top: '15%',
       containLabel: true,
     },
-    xAxis: {
-      type: 'category',
-      data: categories,
-      axisLabel: {
-        rotate: 45,
-        fontSize: 10,
-        interval: 0,
-      },
-    },
-    yAxis: {
-      type: 'value',
-      name: 'Count',
-    },
+    xAxis: isHorizontal ? valueAxis : labelAxis,
+    yAxis: isHorizontal ? labelAxis : valueAxis,
     series: [
       {
-        name: props.labelA || 'Period A',
+        name: nameA,
         type: 'bar',
-        data: categories.map((c) => getCount(props.dataA, c)),
-        itemStyle: {
-          color: 'rgba(13, 148, 136, 0.7)',
-        },
+        data: items.map((b) => plotCount(b.countA, props.logScale)),
+        itemStyle: { color: 'rgba(13, 148, 136, 0.7)' },
+        barMaxWidth: 20,
+        ...countBarStyle(props.logScale),
       },
       {
-        name: props.labelB || 'Period B',
+        name: nameB,
         type: 'bar',
-        data: categories.map((c) => getCount(props.dataB, c)),
-        itemStyle: {
-          color: 'rgba(245, 158, 11, 0.45)',
-        },
+        data: items.map((b) => plotCount(b.countB, props.logScale)),
+        itemStyle: { color: 'rgba(245, 158, 11, 0.45)' },
+        barMaxWidth: 20,
+        ...countBarStyle(props.logScale),
       },
     ],
   }
@@ -81,5 +101,5 @@ const option = computed(() => {
 </script>
 
 <template>
-  <v-chart :option="option" autoresize style="height: 220px" />
+  <v-chart :option="option" autoresize :style="{ height: chartHeight + 'px' }" />
 </template>

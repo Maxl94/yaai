@@ -74,12 +74,15 @@ class ModelVersionUpdate(BaseModel):
 class ModelCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
+    project_id: uuid.UUID | None = None  # defaults to the "default" project
 
 
 class ModelRead(BaseModel):
     id: uuid.UUID
     name: str
     description: str | None
+    project_id: uuid.UUID | None = None
+    project_name: str | None = None
     created_at: datetime
     updated_at: datetime
     versions: list[ModelVersionSummary] = []
@@ -91,6 +94,8 @@ class ModelSummary(BaseModel):
     id: uuid.UUID
     name: str
     description: str | None
+    project_id: uuid.UUID | None = None
+    project_name: str | None = None
     created_at: datetime
     updated_at: datetime
     active_version: ModelVersionSummary | None = None
@@ -102,6 +107,7 @@ class ModelSummary(BaseModel):
 class ModelUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
+    project_id: uuid.UUID | None = None  # moves the model to another project (global owners only)
 
 
 class InferSchemaRequest(BaseModel):

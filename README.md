@@ -38,7 +38,7 @@ docker compose up -d
 
 Open **http://localhost:8000** — the server and frontend are ready.
 
-Default login: `admin` / check the server logs for the generated password.
+Default login: `admin` / the generated initial password is stored in a file readable only by the server user (never logged): `docker compose exec backend cat /home/appuser/admin-initial-password.txt`. Or set `BOOTSTRAP_ADMIN_PASSWORD` (min. 12 characters) in `.env` before the first start.
 
 For detailed setup instructions, see the **[Server Setup Guide](https://maxl94.github.io/yaai/server-setup/)** (development) or the **[Deployment Guide](https://maxl94.github.io/yaai/deployment/)** (production).
 
@@ -107,6 +107,7 @@ Full documentation is available at **[maxl94.github.io/yaai](https://maxl94.gith
 - [Deployment](https://maxl94.github.io/yaai/deployment/) — Docker Compose, pip install, Google Cloud SQL
 - [Core Concepts](https://maxl94.github.io/yaai/concepts/) — models, versions, schemas, drift detection
 - [Drift Detection Guide](https://maxl94.github.io/yaai/drift-guide/) — deep dive into the four drift metrics
+- [LLM & Agent Monitoring](https://maxl94.github.io/yaai/llm-monitoring/) — metadata-only drift monitoring for LLM apps
 - [REST API Reference](https://maxl94.github.io/yaai/reference/api/) — full OpenAPI spec
 - [Python SDK Reference](https://maxl94.github.io/yaai/reference/sdk/) — async client docs
 
@@ -120,8 +121,11 @@ docker compose up db -d
 uv sync
 cd frontend && npm ci && cd ..
 
-# Start backend (hot-reload)
+# Apply database migrations (required on first run and after every upgrade)
 cp .env.example .env
+uv run python -m yaai.server.migrate
+
+# Start backend (hot-reload)
 uv run uvicorn yaai.server.main:app --reload --reload-dir yaai --host 0.0.0.0 --port 8000
 
 # Start frontend (separate terminal, hot-reload)

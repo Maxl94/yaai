@@ -12,7 +12,10 @@ Before going live, make sure you've set these:
 - **`ENVIRONMENT=production`** -- the server refuses to start with default credentials in production mode
 - **`BASE_URL`** -- your public URL (e.g. `https://yaai.mycompany.com`). Used for CORS, OAuth redirects, and service account audience.
 - **`DATABASE_URL`** -- point to a managed PostgreSQL instance with strong credentials (not `changeme`)
-- **`AUTH_JWT_SECRET`** and **`SESSION_SECRET`** -- optional but recommended. If not set, the server auto-generates ephemeral secrets on startup (sessions won't survive restarts). Generate with `openssl rand -base64 32`.
+- **`AUTH_JWT_SECRET`** and **`SESSION_SECRET`** -- **required** in production; the server refuses to start without them (a missing secret would silently log users out on every restart and break multiple instances). Generate with `openssl rand -base64 32`.
+- **`BOOTSTRAP_ADMIN_PASSWORD`** -- recommended for the first start (min. 12 characters); **effectively required on Cloud Run**, where you cannot read files inside an instance. Details: [Configuration](configuration.md#security-and-multi-instance-operation).
+- **`RATE_LIMIT_TRUSTED_PROXY_HOPS`** -- set to the number of reverse proxies in front of YAAI, otherwise all users share one rate-limit bucket (`1` when Cloud Run is accessed directly, typically `2` behind an external HTTPS load balancer; see [Configuration](configuration.md#security-and-multi-instance-operation)).
+- **API docs** -- `/docs`, `/redoc` and `/openapi.json` are disabled in production. Set `API_DOCS_ENABLED=true` to expose them.
 
 ## Docker Compose
 
@@ -39,7 +42,7 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 === "Local auth (default)"
 
-    Username + password login with API key auth for service accounts. An admin account is created automatically on first startup -- check the server logs for the generated password.
+    Username + password login with API key auth for service accounts. An admin account is created automatically on first startup. Set `BOOTSTRAP_ADMIN_PASSWORD` or read the generated password from `admin-initial-password.txt` in the container working directory (see [Configuration](configuration.md#security-and-multi-instance-operation)).
 
     ```yaml
     services:
@@ -57,6 +60,16 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
           timeout: 3s
           retries: 5
 
+      migrate:
+        build: .
+        command: ["python", "-m", "yaai.server.migrate"]
+        environment:
+          DATABASE_URL: postgresql+asyncpg://aimon:change-me-in-production@db:5432/aimonitoring
+        restart: "no"
+        depends_on:
+          db:
+            condition: service_healthy
+
       yaai:
         build: .
         ports:
@@ -66,11 +79,14 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
           DATABASE_URL: postgresql+asyncpg://aimon:change-me-in-production@db:5432/aimonitoring
           ENVIRONMENT: production
           AUTH_ENABLED: "true"
-          # AUTH_JWT_SECRET: <generate with: openssl rand -base64 32>
-          # SESSION_SECRET: <generate with: openssl rand -base64 32>
+          AUTH_JWT_SECRET: <generate with: openssl rand -base64 32>
+          SESSION_SECRET: <generate with: openssl rand -base64 32>
+          BOOTSTRAP_ADMIN_PASSWORD: <at least 12 characters>
         depends_on:
           db:
             condition: service_healthy
+          migrate:
+            condition: service_completed_successfully
 
     volumes:
       pgdata:
@@ -99,6 +115,16 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
           timeout: 3s
           retries: 5
 
+      migrate:
+        build: .
+        command: ["python", "-m", "yaai.server.migrate"]
+        environment:
+          DATABASE_URL: postgresql+asyncpg://aimon:change-me-in-production@db:5432/aimonitoring
+        restart: "no"
+        depends_on:
+          db:
+            condition: service_healthy
+
       yaai:
         build: .
         ports:
@@ -108,8 +134,8 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
           DATABASE_URL: postgresql+asyncpg://aimon:change-me-in-production@db:5432/aimonitoring
           ENVIRONMENT: production
           AUTH_ENABLED: "true"
-          # AUTH_JWT_SECRET: <generate with: openssl rand -base64 32>
-          # SESSION_SECRET: <generate with: openssl rand -base64 32>
+          AUTH_JWT_SECRET: <generate with: openssl rand -base64 32>
+          SESSION_SECRET: <generate with: openssl rand -base64 32>
 
           # Google OAuth
           AUTH_OAUTH_GOOGLE_ENABLED: "true"
@@ -127,6 +153,8 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
         depends_on:
           db:
             condition: service_healthy
+          migrate:
+            condition: service_completed_successfully
 
     volumes:
       pgdata:
@@ -144,7 +172,7 @@ CMD ["uvicorn", "yaai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]
 docker compose up -d
 ```
 
-Open your `BASE_URL` -- you should see the login screen. Migrations run automatically on startup.
+Open your `BASE_URL` -- you should see the login screen. The one-shot `migrate` service applies pending database migrations before the server starts; the server itself never migrates and refuses to start if the schema is behind.
 
 > [!TIP]
 > **Already cloned the repo?** You can also deploy directly with the included `docker-compose.yml` and `Dockerfile.dev`. Copy `.env.example` to `.env`, set your values, and run `docker compose up -d`. The repo's Dockerfile builds the frontend from source and includes a healthcheck.
@@ -164,15 +192,18 @@ export BASE_URL=https://yaai.mycompany.com
 export DATABASE_URL=postgresql+asyncpg://user:password@your-db-host:5432/aimonitoring
 export ENVIRONMENT=production
 export AUTH_ENABLED=true
+export AUTH_JWT_SECRET=$(openssl rand -base64 32)
+export SESSION_SECRET=$(openssl rand -base64 32)
 ```
 
-Start the server:
+Apply database migrations (on first install and after every upgrade), then start the server:
 
 ```bash
+python -m yaai.server.migrate
 uvicorn yaai.server.main:app --host 0.0.0.0 --port 8000
 ```
 
-The server runs migrations automatically, creates the admin account, and serves both the API and the frontend.
+The server checks on startup that the schema is up to date, creates the admin account, and serves both the API and the frontend.
 
 ## Google Cloud SQL
 
@@ -184,7 +215,7 @@ If your PostgreSQL runs on Google Cloud SQL, YAAI can connect using the **Cloud 
 pip install "yaai-monitoring[server,gcp]"
 ```
 
-This adds the Cloud SQL Connector, `pg8000` (for migrations), and `google-auth`.
+This adds the Cloud SQL Connector, `pg8000` (for migrations and the startup schema check), and `google-auth`.
 
 ### Configure connection
 
@@ -208,6 +239,51 @@ CLOUD_SQL_IP_TYPE=public    # public, private, or psc
 
 When `CLOUD_SQL_INSTANCE` is set, the connector handles all database connections automatically. `DATABASE_URL` is ignored.
 
+### Run migrations as a Cloud Run Job
+
+The server never migrates on startup, so on GCP run migrations as a **Cloud Run Job** that uses the same image as the service and executes `python -m yaai.server.migrate`. The job connects through the Cloud SQL Connector exactly like the server (same `CLOUD_SQL_*` variables), so no Auth Proxy is needed.
+
+Run the job with the **same service account and database user as the service**. PostgreSQL tables are owned by the user that creates them, so a different migration user would either lock the server out of new tables or be unable to alter the existing ones. If you want a dedicated migration service account anyway, you must set up the roles yourself (e.g. make the migration user a member of the server's role or transfer ownership, and use `ALTER DEFAULT PRIVILEGES` for new objects).
+
+```bash
+# One-time setup: job with the same service account and settings as the service
+gcloud run jobs create yaai-migrate \
+  --image europe-west1-docker.pkg.dev/my-project/yaai/yaai:TAG \
+  --command python --args=-m,yaai.server.migrate \
+  --service-account yaai-server@my-project.iam.gserviceaccount.com \
+  --set-env-vars CLOUD_SQL_INSTANCE=my-project:us-central1:yaai-db,CLOUD_SQL_USER=yaai-server@my-project.iam.gserviceaccount.com,CLOUD_SQL_DATABASE=aimonitoring \
+  --region us-central1
+```
+
+> [!NOTE]
+> With `CLOUD_SQL_IP_TYPE=private` or `psc` the job needs the same network access as the service: configure Direct VPC egress (`--network`/`--subnet`) or a Serverless VPC connector (`--vpc-connector`) on the job as well. With `public` no extra networking is required.
+
+In your CD pipeline, update and run the job **before** deploying the new service revision. `--wait` makes the step fail if the migration fails, so the old revision keeps serving. Example GitHub Actions steps:
+
+```yaml
+- uses: google-github-actions/auth@v2
+  with:
+    workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+    service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
+- uses: google-github-actions/setup-gcloud@v2
+- name: Run database migrations
+  run: |
+    gcloud run jobs update yaai-migrate --image "$IMAGE" --region us-central1
+    gcloud run jobs execute yaai-migrate --region us-central1 --wait
+- name: Deploy service
+  run: gcloud run deploy yaai --image "$IMAGE" --region us-central1
+- name: Deploy worker
+  run: gcloud run worker-pools deploy yaai-worker --image "$IMAGE" --region us-central1
+```
+
+The last step is only needed if you run a [scheduled jobs worker](#scheduled-jobs-worker). It keeps the worker on the same image as the migrated schema and the API.
+
+#### Rollbacks and backward-compatible migrations
+
+On startup the server fails fast if the database is empty or **behind** the application. If the database is **ahead** (it was already migrated by a newer version, e.g. while the old revision still serves traffic or after a traffic rollback), the server only logs a warning and keeps starting. This means migrations must be backward compatible with the previous application version (expand/contract): add columns/tables first, and remove or rename them only in a later release once no older version uses them. `python -m yaai.server.migrate` refuses to run with an older image against a newer database and exits with a clear error.
+
+A Cloud Run Job is preferred over a Cloud Function: it reuses the already built application image (including Alembic and the migration files), so there is no separate packaging or dependency set to maintain, and it can run longer than function timeouts allow.
+
 ### Google service account auth for SDK clients
 
 SDK clients on GCP workloads can authenticate using Google Application Default Credentials instead of API keys:
@@ -230,13 +306,66 @@ async with YaaiClient("https://yaai.mycompany.com/api/v1") as client:
 > [!TIP]
 > SDK clients using Google SA auth need the `gcp` extra: `pip install "yaai-monitoring[gcp]"`. Clients using API keys only need the base package.
 
+## Security
+
+- **Security headers** -- every response carries a Content-Security-Policy (`script-src 'self'`, no framing, no plugins), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`; `Strict-Transport-Security` is added when `BASE_URL` is `https://` or the request arrives over HTTPS. Disable with `SECURITY_HEADERS_ENABLED=false` only if your reverse proxy sets equivalent headers. When `/docs` is enabled it gets a relaxed CSP that allows `cdn.jsdelivr.net`.
+- **Rate limiting** -- keyed by client IP. Behind a proxy set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (see [Configuration](configuration.md#security-and-multi-instance-operation)); YAAI then uses the N-th entry from the right of `X-Forwarded-For`, ignoring client-supplied entries on the left.
+- **Session tokens** -- the web UI keeps the access token in memory only and the refresh token in an `httpOnly`, `SameSite=Lax` cookie (`yaai_refresh`, path `/api/v1/auth`, `Secure` when `BASE_URL` is `https://`), so an XSS cannot read a long-lived token. After a page reload the UI restores the session with `POST /api/v1/auth/refresh`, which rotates the cookie (the previous token stays valid for 30 seconds so a reload or second tab racing the rotation is not logged out). This requires the UI and API to share one origin (the default: the server serves the UI). Keep dependencies updated and do not add third-party scripts to the frontend.
+
+## Running multiple instances
+
+YAAI is designed as a single instance, but can run several (for example Cloud Run with `max-instances > 1`) if you take care of the following:
+
+| Concern | Behavior | What to do |
+|---|---|---|
+| `AUTH_JWT_SECRET`, `SESSION_SECRET` | Required in production; tokens and OAuth state signed by one instance must validate on all others | Use the **same** values on every instance (Secret Manager) |
+| Rate limiting | Counters live in memory per instance, so the effective limit is multiplied by the instance count | Set `RATE_LIMIT_STORAGE_URI=redis://host:6379` (install the Redis client, e.g. `pip install redis`; it is not a YAAI dependency) |
+| Client IP | Behind a proxy every user may share its IP | Set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (see [Configuration](configuration.md#security-and-multi-instance-operation)) |
+| Google token verification caches | Kept in memory per instance; only a performance cache | Nothing, each instance fills its own. Login (including Google OAuth) is stateless and works on any instance, no session affinity needed |
+| Scheduled drift jobs | Every instance with `SCHEDULER_ENABLED=true` runs its own in-memory scheduler, so each cron job would fire on every such instance | Set `SCHEDULER_ENABLED=false` on all API instances and run the scheduled jobs in a single [worker](#scheduled-jobs-worker) |
+
+### Scheduled jobs worker
+
+The worker is a headless process (no HTTP server) that runs all scheduled drift jobs and therefore also creates the drift notifications. It uses the same image and configuration as the API; only the command differs:
+
+```bash
+python -m yaai.server.worker
+```
+
+Run the API with `SCHEDULER_ENABLED=false` on any number of instances and exactly **one** worker. The worker always runs the scheduler and checks that the database schema is up to date on startup, so run the migration first. It stops cleanly on `SIGTERM`/`SIGINT`.
+
+Job changes made through the API reach the worker within 60 seconds (it re-reads the active jobs from the database on that interval). `POST /jobs/{id}/trigger` and the backfill endpoint still run inside the API request. A PostgreSQL advisory lock makes an overlapping execution of the same job skip; it does not prevent a job from running twice one after another, which is why there must be a single worker. The lock is skipped on non-PostgreSQL databases, and a job needs one database connection for its whole run.
+
+On **Cloud Run** use a [worker pool](https://cloud.google.com/run/docs/deploy-worker-pools) with one instance and the same service account and `CLOUD_SQL_*` settings as the API service:
+
+```bash
+gcloud run worker-pools deploy yaai-worker \
+  --image europe-west1-docker.pkg.dev/my-project/yaai/yaai:TAG \
+  --command python --args=-m,yaai.server.worker \
+  --service-account yaai-server@my-project.iam.gserviceaccount.com \
+  --set-env-vars CLOUD_SQL_INSTANCE=my-project:us-central1:yaai-db,CLOUD_SQL_USER=yaai-server@my-project.iam.gserviceaccount.com,CLOUD_SQL_DATABASE=aimonitoring \
+  --instances 1 \
+  --region us-central1
+```
+
+Worker pools have no URL and no CPU throttling, so no extra flags are needed. Deploy the worker after the migration job, together with the API. For `docker compose` see the `worker` service in `docker-compose.yml`.
+
+> [!IMPORTANT]
+> **Cloud Run, single service:** if the API service itself runs the scheduler (`SCHEDULER_ENABLED=true`, the default), it needs CPU outside of requests. Deploy it with **"CPU always allocated"** (`--no-cpu-throttling`) and `--min-instances=1`, otherwise cron jobs are silently missed. To scale the API beyond one instance, move the scheduler to the worker pool above instead.
+
 ## Troubleshooting
 
 **Server refuses to start in production mode**
 : You're running with `ENVIRONMENT=production` but haven't changed the default `changeme` password in `DATABASE_URL`. Use strong credentials.
 
-**Migrations fail on startup**
-: Check that PostgreSQL is running and `DATABASE_URL` is correct. Disable auto-migration with `AUTO_MIGRATE=false` and run manually: `alembic upgrade head`.
+**Server refuses to start: "AUTH_JWT_SECRET must be set in production" / "SESSION_SECRET must be set in production"**
+: Set both secrets (`openssl rand -base64 32`) or run with `ENVIRONMENT=development`.
+
+**"Database schema is not up to date" on startup**
+: The server does not apply migrations automatically. Run `python -m yaai.server.migrate` (Docker Compose: make sure the `migrate` service is defined and completed; Cloud Run: execute the migration job) and start the server again.
+
+**Migrations fail**
+: Check that PostgreSQL is running and `DATABASE_URL` (or the `CLOUD_SQL_*` variables) is correct.
 
 **Google OAuth login redirects fail**
 : Verify `BASE_URL` matches the origin users access in their browser, and that the OAuth redirect URI in Google Cloud Console matches `{BASE_URL}/api/v1/auth/oauth/google/callback`.

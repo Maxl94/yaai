@@ -1,5 +1,6 @@
 """Unit tests for the YaaiClient SDK."""
 
+import json
 import uuid
 
 import httpx
@@ -34,6 +35,17 @@ class MockTransport(httpx.AsyncBaseTransport):
             return httpx.Response(status, json=body, request=request)
         # Default: 404
         return httpx.Response(404, json={"detail": "Not found"}, request=request)
+
+
+def _model_json(name: str) -> dict:
+    return {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "description": None,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "versions": [],
+    }
 
 
 def _make_client(transport: MockTransport, api_key: str = "yaam_test") -> YaaiClient:
@@ -188,25 +200,140 @@ class TestClientModels:
         transport = MockTransport()
         transport.add_response(
             "GET",
-            "/models",
+            "/models?page=1&page_size=100",
             200,
-            {
-                "data": [
-                    {
-                        "id": str(uuid.uuid4()),
-                        "name": "m1",
-                        "description": None,
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-01T00:00:00Z",
-                        "versions": [],
-                    },
-                ]
-            },
+            {"data": [_model_json("m1")], "meta": {"total": 1, "page": 1, "page_size": 100}},
         )
         client = _make_client(transport)
         result = await client.list_models()
         assert len(result) == 1
         assert result[0].name == "m1"
+
+    async def test_list_models_fetches_all_pages(self):
+        transport = MockTransport()
+        meta = {"total": 3, "page_size": 100}
+        transport.add_response(
+            "GET",
+            "/models?page=1&page_size=100",
+            200,
+            {"data": [_model_json("m1"), _model_json("m2")], "meta": {**meta, "page": 1}},
+        )
+        transport.add_response(
+            "GET", "/models?page=2&page_size=100", 200, {"data": [_model_json("m3")], "meta": {**meta, "page": 2}}
+        )
+        client = _make_client(transport)
+
+        result = await client.list_models()
+
+        assert [m.name for m in result] == ["m1", "m2", "m3"]
+        assert len(transport.requests) == 2
+
+    async def test_list_models_stops_on_empty_page(self):
+        transport = MockTransport()
+        meta = {"total": 5, "page_size": 100}
+        transport.add_response(
+            "GET", "/models?page=1&page_size=100", 200, {"data": [_model_json("m1")], "meta": {**meta, "page": 1}}
+        )
+        transport.add_response("GET", "/models?page=2&page_size=100", 200, {"data": [], "meta": {**meta, "page": 2}})
+        client = _make_client(transport)
+
+        assert [m.name for m in await client.list_models()] == ["m1"]
+
+    async def test_create_model_sends_project_id(self):
+        transport = MockTransport()
+        project_id = uuid.uuid4()
+        transport.add_response(
+            "POST",
+            "/models",
+            201,
+            {
+                "data": {
+                    "id": str(uuid.uuid4()),
+                    "name": "scoped",
+                    "description": None,
+                    "project_id": str(project_id),
+                    "project_name": "team-a",
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "versions": [],
+                }
+            },
+        )
+        client = _make_client(transport)
+
+        result = await client.create_model("scoped", project_id=project_id)
+
+        assert json.loads(transport.requests[0].content)["project_id"] == str(project_id)
+        assert result.project_id == project_id
+        assert result.project_name == "team-a"
+
+    async def test_create_model_without_project_sends_null_project(self):
+        transport = MockTransport()
+        transport.add_response(
+            "POST",
+            "/models",
+            201,
+            {
+                "data": {
+                    "id": str(uuid.uuid4()),
+                    "name": "legacy",
+                    "description": None,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "versions": [],
+                }
+            },
+        )
+        client = _make_client(transport)
+
+        result = await client.create_model("legacy")
+
+        assert json.loads(transport.requests[0].content)["project_id"] is None
+        assert result.project_id is None
+
+    async def test_list_models_filters_by_project(self):
+        transport = MockTransport()
+        project_id = uuid.uuid4()
+        transport.add_response(
+            "GET",
+            f"/models?project_id={project_id}&page=1&page_size=100",
+            200,
+            {"data": [], "meta": {"total": 0, "page": 1, "page_size": 100}},
+        )
+        client = _make_client(transport)
+
+        assert await client.list_models(project_id=project_id) == []
+        assert transport.requests[0].url.params["project_id"] == str(project_id)
+
+    async def test_list_projects(self):
+        transport = MockTransport()
+        project_id = str(uuid.uuid4())
+        transport.add_response(
+            "GET",
+            "/projects",
+            200,
+            {
+                "data": [
+                    {
+                        "id": project_id,
+                        "name": "default",
+                        "description": None,
+                        "is_default": True,
+                        "model_count": 3,
+                        "my_role": "editor",
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z",
+                    }
+                ]
+            },
+        )
+        client = _make_client(transport)
+
+        projects = await client.list_projects()
+
+        assert [(str(p.id), p.name, p.my_role, p.model_count) for p in projects] == [
+            (project_id, "default", "editor", 3)
+        ]
 
     async def test_delete_model(self):
         transport = MockTransport()
@@ -745,7 +872,7 @@ class TestClientGetVersionByLabel:
 class TestClientCredentialRefresh:
     async def test_refresh_noop_when_no_credentials(self):
         transport = MockTransport()
-        transport.add_response("GET", "/models", 200, {"data": []})
+        transport.add_response("GET", "/models?page=1&page_size=100", 200, {"data": [], "meta": {"total": 0}})
         client = _make_client(transport)
         # _refresh_google_credentials should be no-op
         client._refresh_google_credentials()

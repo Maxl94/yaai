@@ -4,11 +4,13 @@ import { useRouter, useRoute } from 'vue-router'
 import { useTheme } from 'vuetify'
 import { notificationsApi } from '@/api/notifications'
 import { useAuthStore } from '@/stores/auth'
+import { useProjectsStore } from '@/stores/projects'
 
 const router = useRouter()
 const route = useRoute()
 const theme = useTheme()
 const authStore = useAuthStore()
+const projectsStore = useProjectsStore()
 
 const rail = ref(true)
 const unreadCount = ref(0)
@@ -20,8 +22,8 @@ function toggleTheme() {
   theme.global.name.value = isDark.value ? 'light' : 'dark'
 }
 
-function handleLogout() {
-  authStore.logout()
+async function handleLogout() {
+  await authStore.logout()
   router.push('/login')
 }
 
@@ -32,13 +34,20 @@ const navigationItems = computed(() => {
     { title: 'Drift', icon: 'mdi-chart-timeline-variant-shimmer', to: '/drift', description: 'Detection results' },
     { title: 'Alerts', icon: 'mdi-bell-ring-outline', to: '/notifications', description: 'Notifications' },
   ]
+  if (authStore.authEnabled) {
+    items.push({ title: 'Projects', icon: 'mdi-folder-multiple-outline', to: '/projects', description: 'Access & members' })
+  }
   if (authStore.isOwner) {
     items.push({ title: 'Settings', icon: 'mdi-cog-outline', to: '/settings', description: 'Users & access' })
   }
   return items
 })
 
+// The layout can mount before the router redirects an anonymous user to /login; avoid 401s until signed in
+const canLoadData = computed(() => authStore.isAuthenticated || !authStore.authEnabled)
+
 async function fetchUnreadCount() {
+  if (!canLoadData.value) return
   try {
     unreadCount.value = await notificationsApi.getUnreadCount()
   } catch (error) {
@@ -47,6 +56,7 @@ async function fetchUnreadCount() {
 }
 
 onMounted(() => {
+  if (canLoadData.value) void projectsStore.ensureLoaded()
   fetchUnreadCount()
   pollInterval = window.setInterval(fetchUnreadCount, 30000)
 })

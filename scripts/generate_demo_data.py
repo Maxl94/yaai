@@ -187,7 +187,8 @@ def get_or_create_model(client: httpx.Client, name: str, description: str) -> di
     response = client.get(f"{BASE_URL}/models", params={"search": name})
     response.raise_for_status()
     for m in response.json()["data"]:
-        if m["name"] == name:
+        # Models are created in the default project; names are only unique per project
+        if m["name"] == name and m.get("project_name") in (None, "default"):
             print(f"  Found existing model: {m['id']}")
             return m
 

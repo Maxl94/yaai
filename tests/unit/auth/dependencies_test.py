@@ -17,6 +17,7 @@ from yaai.server.auth.dependencies import (
     check_model_write_access,
     get_accessible_model_ids,
     get_auth_config,
+    get_current_identity,
     require_auth,
     require_owner,
     resolve_model_id_from_job,
@@ -78,23 +79,83 @@ class TestGetAuthConfig:
         set_auth_config(AuthConfig(enabled=False))
 
 
+def _db_returning(user):
+    db = AsyncMock()
+    db.get.return_value = user
+    return db
+
+
+def _user(role=UserRole.OWNER, is_active=True, user_id=None):
+    return MagicMock(id=user_id or uuid.uuid4(), role=role, is_active=is_active, username="alice")
+
+
 class TestTryJwt:
     async def test_valid_access_token(self, auth_config):
-        token = create_access_token(auth_config, subject="user-1", role="owner")
-        identity = await _try_jwt(auth_config, token)
+        user = _user()
+        token = create_access_token(auth_config, subject=str(user.id), role="owner")
+        identity = await _try_jwt(auth_config, token, _db_returning(user))
         assert identity is not None
-        assert identity.user_id == "user-1"
+        assert identity.user_id == str(user.id)
         assert identity.role == UserRole.OWNER
         assert identity.identity_type == "user"
+        assert identity.username == "alice"
+
+    async def test_role_comes_from_database_not_token(self, auth_config):
+        user = _user(role=UserRole.VIEWER)
+        token = create_access_token(auth_config, subject=str(user.id), role="owner")
+        identity = await _try_jwt(auth_config, token, _db_returning(user))
+        assert identity is not None
+        assert identity.role == UserRole.VIEWER
+        assert identity.is_owner is False
+
+    async def test_deleted_user_rejected(self, auth_config):
+        token = create_access_token(auth_config, subject=str(uuid.uuid4()), role="owner")
+        with pytest.raises(HTTPException) as exc:
+            await _try_jwt(auth_config, token, _db_returning(None))
+        assert exc.value.status_code == 401
+
+    async def test_inactive_user_rejected(self, auth_config):
+        user = _user(is_active=False)
+        token = create_access_token(auth_config, subject=str(user.id), role="owner")
+        with pytest.raises(HTTPException) as exc:
+            await _try_jwt(auth_config, token, _db_returning(user))
+        assert exc.value.status_code == 401
+
+    async def test_malformed_subject_rejected(self, auth_config):
+        token = create_access_token(auth_config, subject="not-a-uuid", role="owner")
+        db = _db_returning(None)
+        with pytest.raises(HTTPException) as exc:
+            await _try_jwt(auth_config, token, db)
+        assert exc.value.status_code == 401
+        db.get.assert_not_called()
 
     async def test_refresh_token_rejected(self, auth_config):
-        token, _ = create_refresh_token(auth_config, subject="user-1", role="owner")
-        identity = await _try_jwt(auth_config, token)
-        assert identity is None
+        token, _ = create_refresh_token(auth_config, subject=str(uuid.uuid4()), role="owner")
+        db = _db_returning(None)
+        assert await _try_jwt(auth_config, token, db) is None
+        db.get.assert_not_called()
 
     async def test_invalid_token_returns_none(self, auth_config):
-        identity = await _try_jwt(auth_config, "garbage-token")
-        assert identity is None
+        assert await _try_jwt(auth_config, "garbage-token", _db_returning(None)) is None
+
+
+class TestGetCurrentIdentityNoFallthrough:
+    async def test_jwt_of_deleted_user_is_not_rescued_by_api_key(self, auth_config):
+        token = create_access_token(auth_config, subject=str(uuid.uuid4()), role="owner")
+        credentials = MagicMock(credentials=token)
+        sa_identity = CurrentIdentity(user_id=None, role=UserRole.VIEWER, identity_type="service_account_api_key")
+        with (
+            patch("yaai.server.auth.dependencies._try_api_key", new_callable=AsyncMock) as mock_api_key,
+            patch("yaai.server.auth.dependencies._try_google_sa", new_callable=AsyncMock) as mock_google_sa,
+            patch("yaai.server.auth.dependencies._try_google_user", new_callable=AsyncMock) as mock_google_user,
+        ):
+            mock_api_key.return_value = sa_identity
+            with pytest.raises(HTTPException) as exc:
+                await get_current_identity(credentials, "valid-sa-key", _db_returning(None))
+        assert exc.value.status_code == 401
+        mock_api_key.assert_not_awaited()
+        mock_google_sa.assert_not_awaited()
+        mock_google_user.assert_not_awaited()
 
 
 class TestTryApiKey:
@@ -186,154 +247,38 @@ class TestRequireOwner:
         set_auth_config(AuthConfig(enabled=False))
 
 
-class TestCheckModelWriteAccess:
-    async def test_allows_owner(self, auth_config):
+class TestModelAccessWithoutDatabaseLookup:
+    """Cases decided before the database is consulted (the permission matrix lives in project_permissions_test.py)."""
+
+    async def test_write_allows_owner(self, auth_config):
         identity = CurrentIdentity(user_id="u1", role=UserRole.OWNER)
-        db = AsyncMock()
-        await check_model_write_access(uuid.uuid4(), identity, db)  # no exception
+        await check_model_write_access(uuid.uuid4(), identity, AsyncMock())
 
-    async def test_rejects_viewer(self, auth_config):
-        identity = CurrentIdentity(user_id="u1", role=UserRole.VIEWER, identity_type="user")
-        db = AsyncMock()
-        with pytest.raises(HTTPException) as exc_info:
-            await check_model_write_access(uuid.uuid4(), identity, db)
-        assert exc_info.value.status_code == 403
-
-    async def test_sa_with_access(self, auth_config):
-        sa_id = str(uuid.uuid4())
-        model_id = uuid.uuid4()
-        identity = CurrentIdentity(
-            user_id=sa_id,
-            role=UserRole.VIEWER,
-            identity_type="api_key",
-            service_account_id=sa_id,
-        )
-        db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = MagicMock()  # access exists
-        db.execute.return_value = mock_result
-
-        await check_model_write_access(model_id, identity, db)  # no exception
-
-    async def test_sa_without_access(self, auth_config):
-        sa_id = str(uuid.uuid4())
-        model_id = uuid.uuid4()
-        identity = CurrentIdentity(
-            user_id=sa_id,
-            role=UserRole.VIEWER,
-            identity_type="api_key",
-            service_account_id=sa_id,
-        )
-        db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None  # no access
-        db.execute.return_value = mock_result
-
-        with pytest.raises(HTTPException) as exc_info:
-            await check_model_write_access(model_id, identity, db)
-        assert exc_info.value.status_code == 403
-
-    async def test_sa_without_id_raises(self, auth_config):
-        identity = CurrentIdentity(
-            user_id=None,
-            role=UserRole.VIEWER,
-            identity_type="api_key",
-            service_account_id=None,
-        )
-        db = AsyncMock()
-        with pytest.raises(HTTPException) as exc_info:
-            await check_model_write_access(uuid.uuid4(), identity, db)
-        assert exc_info.value.status_code == 403
-
-    async def test_skipped_when_auth_disabled(self):
+    async def test_write_skipped_when_auth_disabled(self):
         set_auth_config(AuthConfig(enabled=False))
         identity = CurrentIdentity(user_id="u1", role=UserRole.VIEWER)
-        db = AsyncMock()
-        await check_model_write_access(uuid.uuid4(), identity, db)
-        set_auth_config(AuthConfig(enabled=False))
+        await check_model_write_access(uuid.uuid4(), identity, AsyncMock())
 
+    async def test_sa_without_id_rejected(self, auth_config):
+        identity = CurrentIdentity(user_id=None, role=UserRole.VIEWER, identity_type="api_key", service_account_id=None)
+        for check in (check_model_write_access, check_model_read_access):
+            with pytest.raises(HTTPException) as exc_info:
+                await check(uuid.uuid4(), identity, AsyncMock())
+            assert exc_info.value.status_code == 403
 
-class TestCheckModelReadAccess:
-    async def test_user_always_allowed(self, auth_config):
-        identity = CurrentIdentity(user_id="u1", role=UserRole.VIEWER, identity_type="user")
-        db = AsyncMock()
-        await check_model_read_access(uuid.uuid4(), identity, db)  # no exception
+    async def test_accessible_ids_none_for_owner(self, auth_config):
+        identity = CurrentIdentity(user_id="u1", role=UserRole.OWNER, identity_type="user")
+        assert await get_accessible_model_ids(identity) is None
 
-    async def test_sa_with_access(self, auth_config):
-        sa_id = str(uuid.uuid4())
-        identity = CurrentIdentity(
-            user_id=None,
-            role=UserRole.VIEWER,
-            identity_type="api_key",
-            service_account_id=sa_id,
-        )
-        db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = MagicMock()
-        db.execute.return_value = mock_result
-
-        await check_model_read_access(uuid.uuid4(), identity, db)
-
-    async def test_sa_without_access(self, auth_config):
-        sa_id = str(uuid.uuid4())
-        identity = CurrentIdentity(
-            user_id=None,
-            role=UserRole.VIEWER,
-            identity_type="api_key",
-            service_account_id=sa_id,
-        )
-        db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        db.execute.return_value = mock_result
-
-        with pytest.raises(HTTPException) as exc_info:
-            await check_model_read_access(uuid.uuid4(), identity, db)
-        assert exc_info.value.status_code == 403
-
-
-class TestGetAccessibleModelIds:
-    async def test_returns_none_for_user(self, auth_config):
-        identity = CurrentIdentity(user_id="u1", role=UserRole.VIEWER, identity_type="user")
-        db = AsyncMock()
-        result = await get_accessible_model_ids(identity, db)
-        assert result is None
-
-    async def test_returns_none_when_auth_disabled(self):
+    async def test_accessible_ids_none_when_auth_disabled(self):
         set_auth_config(AuthConfig(enabled=False))
         identity = CurrentIdentity(user_id="u1", role=UserRole.VIEWER, identity_type="api_key")
-        db = AsyncMock()
-        result = await get_accessible_model_ids(identity, db)
-        assert result is None
-        set_auth_config(AuthConfig(enabled=False))
+        assert await get_accessible_model_ids(identity) is None
 
-    async def test_returns_empty_for_sa_without_id(self, auth_config):
-        identity = CurrentIdentity(
-            user_id=None,
-            role=UserRole.VIEWER,
-            identity_type="api_key",
-            service_account_id=None,
-        )
-        db = AsyncMock()
-        result = await get_accessible_model_ids(identity, db)
-        assert result == []
-
-    async def test_returns_model_ids_for_sa(self, auth_config):
-        sa_id = str(uuid.uuid4())
-        model_id = uuid.uuid4()
-        identity = CurrentIdentity(
-            user_id=None,
-            role=UserRole.VIEWER,
-            identity_type="api_key",
-            service_account_id=sa_id,
-        )
-        db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [model_id]
-        db.execute.return_value = mock_result
-
-        result = await get_accessible_model_ids(identity, db)
-        assert result == [model_id]
+    async def test_accessible_ids_empty_for_sa_without_id(self, auth_config):
+        identity = CurrentIdentity(user_id=None, role=UserRole.VIEWER, identity_type="api_key", service_account_id=None)
+        query = await get_accessible_model_ids(identity)
+        assert any(marker in str(query).lower() for marker in ("false", "0 = 1"))
 
 
 class TestResolveModelIdFromVersion:

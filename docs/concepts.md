@@ -1,10 +1,47 @@
 # Core Concepts
 
-YAAI has a small surface area. There are five things to understand, and they chain together linearly.
+YAAI has a small surface area. There are six things to understand, and they chain together linearly.
 
 ## Models
 
 A model represents a deployed ML system. "Fraud detector", "churn predictor", "price estimator" -- one entry per thing you want to monitor. It's just a name and a description.
+
+## Projects
+
+Every model belongs to exactly one **project**. Projects are the unit of access control: who can see and change a model is decided by the user's role in the model's project. Model names are unique *per project*, so two teams can both have a "churn-predictor".
+
+A fresh installation (and every upgraded one) contains a project named `default`. Models created without an explicit `project_id` -- for example by older SDK scripts -- land there. The `default` project cannot be renamed or deleted.
+
+Only global owners can create or delete projects (and only empty ones can be deleted). Models can be moved to another project by global owners only; names must not clash in the target project.
+
+### Roles
+
+Access combines the **global role** of a user with their **project role**:
+
+| Capability | Global owner | Project owner | Project editor | Project viewer | Not a member |
+|---|---|---|---|---|---|
+| Access all projects and models | yes | no | no | no | no |
+| Read models, versions, dashboards, drift results, jobs, notifications | yes | yes | yes | yes | no |
+| Create models, versions, log inferences, upload reference data, edit/trigger jobs | yes | yes | yes | no | no |
+| Manage project members, rename the project | yes | yes | no | no | no |
+| Create / delete projects | yes | no | no | no | no |
+| Move models between projects, delete models, list raw inferences | yes | no | no | no | no |
+
+A global **viewer** is a regular user whose access comes entirely from project memberships. New users -- including users that are auto-created on their first Google login -- see no models until a project owner or global owner adds them to a project.
+
+Service accounts keep their per-model access (`model_access`) and can additionally be added to a project with a role. They may read/write a model if either grants it. Service accounts without a membership may still create models in the `default` project and are granted per-model access to them, so existing SDK scripts keep working. When a service account creates a model through a project membership (editor), no per-model grant is added, so removing the membership removes the access. Service accounts can be project editors or viewers but not project owners.
+
+The project name `default` is reserved. A project owner cannot remove or demote the last owner of a project (409); global owners can.
+
+Memberships are always checked against the database, so changes take effect immediately.
+
+### Projects in the web UI
+
+- **Project filter** -- the header of the Models page has a "Project" selector (shown when you can access more than one project) listing "All projects" plus your projects. The model list is filtered by the selection and the choice is remembered in the browser; with "All projects" every model card shows its project. Jobs, Drift and Alerts always show everything you can access. Users who belong to no project see a hint to ask an administrator for access.
+- **Projects page** (`Projects` in the navigation, shown when authentication is enabled) -- lists your projects with model count and your role. Global owners can create, edit and delete projects (the `default` project and non-empty projects cannot be deleted). Project owners can edit their project and manage its members: add users by username, change roles and remove members. Global owners can also pick users and service accounts from a list. Other users see their projects read-only.
+- **Creating models** -- the "New Model" button is available to global owners and to editors/owners of at least one project; the dialog lets you choose the target project.
+- **Model details** -- show the model's project; global owners get a "Move to project" action. Edit, new version, schema, job and threshold actions are only shown to editors and owners of the model's project (the backend enforces the same rules). On the global Jobs page, the job actions are shown per job according to the role in the job's project.
+- **Global user management** (users and service accounts) stays in *Settings* and is available to global owners only.
 
 ## Versions
 
@@ -92,7 +129,7 @@ Drift detection runs on a schedule. A **job** defines:
 
 When you create a model version, YAAI creates a default job automatically (daily at 2am, comparing the last day of inferences against reference data). It activates when you upload reference data.
 
-Each job run produces a drift result per schema field. If any field exceeds its threshold, a notification is created.
+Each job run produces a drift result per schema field. If any field exceeds its threshold, a notification is created. Read state is tracked per user and per service account, so marking a notification as read only affects the person (or service account) who did it. With authentication disabled, a single global read flag is used. Notifications created before a user or service account existed count as read for them, so new accounts do not start with the historic backlog as unread.
 
 ### Comparison view
 
@@ -104,7 +141,7 @@ This is useful for investigating shifts you've been alerted about or for ad-hoc 
 
 There's no dashboard builder. When you navigate to a model version in the UI, YAAI queries inference data for every schema field and renders:
 
-- **Histograms** for numerical fields, with mean, median, std, min, max
+- **Histograms** for numerical fields, with mean, median, std, min, max. Histograms always use 20 equal-width bins, including empty ones, so the x-axis is linear. If a tail reaches far beyond the 1st/99th percentile, the bins stop at that percentile and the outliers are collected in a separate `<p1` / `>p99` bar (dashed in the chart), so a few extreme values don't squash the rest of the distribution. Non-finite values (NaN, Infinity) are ignored. The "Log scale" switch on the dashboard and comparison pages turns the count axis logarithmic, so small bars stay visible next to a dominant one (empty bins are not drawn).
 - **Bar charts** for categorical fields, sorted by frequency
 - **Drift badges** showing the latest score per field
 
@@ -116,11 +153,11 @@ The time range is adjustable. Tabs filter by input vs. output fields.
 
 YAAI supports four auth methods:
 
-- **Local accounts** -- username + password, enabled by default. An admin account is created on first startup with a randomly generated password (check the server logs). Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
+- **Local accounts** -- username + password, enabled by default. An admin account is created on first startup with a randomly generated password (written to a 0600 file, never logged -- see [Server Setup](server-setup.md#default-admin-account)). Owners can create additional users via the API. Public self-registration is disabled by default (`AUTH_LOCAL_ALLOW_REGISTRATION=false`).
 - **Google OAuth** -- for human users via browser. Disabled by default. When enabled, local auth is automatically disabled.
-- **API keys** -- for service accounts and SDK clients (`X-API-Key: yaam_...`). Enabled by default. Keys are scoped per-model.
+- **API keys** -- for service accounts and SDK clients (`X-API-Key: yaam_...`). Enabled by default. Keys are scoped per-model and/or per-project.
 - **Google service accounts** -- for GCP workloads using Application Default Credentials and ID token verification.
 
-Two roles exist: **owner** (full admin access) and **viewer** (read-only).
+Two global roles exist: **owner** (super-admin with full access to every project) and **viewer** (a regular user whose access comes from [project memberships](#projects)).
 
 Configure auth via environment variables (all prefixed with `AUTH_`). See the [Server Setup guide](server-setup.md#6-authentication) for details.

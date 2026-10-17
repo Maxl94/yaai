@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import { jobsApi } from '@/api/jobs'
 import { modelsApi } from '@/api/models'
 import VersionNavTabs from '@/components/VersionNavTabs.vue'
+import { useProjectsStore } from '@/stores/projects'
+import { errorMessage } from '@/utils/errors'
 import type { JobConfig, Model, ModelVersion } from '@/types'
 
 interface JobHistoryItem {
@@ -19,8 +21,27 @@ const modelId = computed(() => route.params.modelId as string | undefined)
 const versionId = computed(() => route.params.versionId as string | undefined)
 const hasRouteParams = computed(() => !!modelId.value && !!versionId.value)
 
+const projectsStore = useProjectsStore()
+
 const model = ref<Model | null>(null)
 const version = ref<ModelVersion | null>(null)
+
+function canWriteJob(job: JobConfig): boolean {
+  return projectsStore.canWrite(job.project_id)
+}
+
+const actionError = ref('')
+const showActionError = computed({
+  get: () => !!actionError.value,
+  set: (value: boolean) => {
+    if (!value) actionError.value = ''
+  },
+})
+
+function reportActionError(error: unknown, fallback: string) {
+  console.error(fallback, error)
+  actionError.value = errorMessage(error, fallback)
+}
 
 const loading = ref(false)
 const saving = ref(false)
@@ -143,7 +164,7 @@ async function saveJob() {
     showEditDialog.value = false
     await loadJobs()
   } catch (error) {
-    console.error('Failed to update job:', error)
+    reportActionError(error, 'Failed to update job')
   } finally {
     saving.value = false
   }
@@ -155,7 +176,7 @@ async function toggleJobActive(job: JobConfig) {
     await jobsApi.update(job.id, { is_active: newState })
     job.is_active = newState
   } catch (error) {
-    console.error('Failed to update job:', error)
+    reportActionError(error, 'Failed to update job')
   }
 }
 
@@ -165,7 +186,7 @@ async function triggerJob(job: JobConfig) {
     await jobsApi.trigger(job.id)
     await loadJobs()
   } catch (error) {
-    console.error('Failed to trigger job:', error)
+    reportActionError(error, 'Failed to trigger job')
   } finally {
     triggeringJob.value = null
   }
@@ -177,7 +198,7 @@ async function backfillJob(job: JobConfig) {
     await jobsApi.backfill(job.id)
     await loadJobs()
   } catch (error) {
-    console.error('Failed to backfill job:', error)
+    reportActionError(error, 'Failed to backfill job')
   } finally {
     backfillingJob.value = null
   }
@@ -217,9 +238,7 @@ async function loadModelVersion() {
 
 onMounted(() => {
   loadJobs()
-  if (hasRouteParams.value) {
-    loadModelVersion()
-  }
+  if (hasRouteParams.value) loadModelVersion()
 })
 </script>
 
@@ -289,8 +308,9 @@ onMounted(() => {
               :color="item.is_active ? 'success' : 'grey'"
               size="small"
               variant="flat"
-              @click="toggleJobActive(item)"
-              style="cursor: pointer"
+              :link="canWriteJob(item)"
+              :style="{ cursor: canWriteJob(item) ? 'pointer' : 'default' }"
+              @click="canWriteJob(item) && toggleJobActive(item)"
             >
               <v-icon start size="14">
                 {{ item.is_active ? 'mdi-check-circle' : 'mdi-pause-circle' }}
@@ -307,6 +327,7 @@ onMounted(() => {
           <template #item.actions="{ item }">
             <div class="d-flex ga-1">
               <v-btn
+                v-if="canWriteJob(item)"
                 icon
                 size="small"
                 variant="tonal"
@@ -317,6 +338,7 @@ onMounted(() => {
                 <v-tooltip activator="parent" location="top">Edit</v-tooltip>
               </v-btn>
               <v-btn
+                v-if="canWriteJob(item)"
                 icon
                 size="small"
                 variant="tonal"
@@ -328,6 +350,7 @@ onMounted(() => {
                 <v-tooltip activator="parent" location="top">Run Now</v-tooltip>
               </v-btn>
               <v-btn
+                v-if="canWriteJob(item)"
                 icon
                 size="small"
                 variant="tonal"
@@ -543,6 +566,10 @@ onMounted(() => {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <v-snackbar v-model="showActionError" color="error" :timeout="6000" data-testid="job-action-error">
+      {{ actionError }}
+    </v-snackbar>
   </div>
 </template>
 

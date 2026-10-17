@@ -22,6 +22,7 @@ docker compose up db -d
 uv sync
 cd frontend && npm ci && cd ..
 cp .env.example .env
+uv run python -m yaai.server.migrate
 
 # Backend (terminal 1)
 uv run uvicorn yaai.server.main:app --reload --reload-dir yaai --host 0.0.0.0 --port 8000
@@ -49,7 +50,7 @@ cd frontend && npm run type-check
 
 ## Database Migrations
 
-YAAI uses [Alembic](https://alembic.sqlalchemy.org/) for schema migrations. Migrations are applied automatically on startup, so users deploying the app never need to think about it.
+YAAI uses [Alembic](https://alembic.sqlalchemy.org/) for schema migrations. Migrations are **not** applied on startup: the server refuses to start if the schema is behind. Apply them with `uv run python -m yaai.server.migrate` (Docker Compose does this automatically via the `migrate` service).
 
 If you change a SQLAlchemy model (add/remove/rename a column, create a new table, etc.), you need to generate a migration:
 
@@ -59,12 +60,12 @@ docker compose up db -d
 
 # Generate the migration
 DATABASE_URL="postgresql+asyncpg://aimon:changeme@localhost:5431/aimonitoring" \
-  uv run alembic revision --autogenerate -m "short description of change"
+  uv run alembic -c yaai/server/alembic.ini revision --autogenerate -m "short description of change"
 ```
 
 This creates a new file in `yaai/server/alembic/versions/`. Review it -- autogenerate is good but not perfect. Check that it captures your changes correctly and doesn't include unintended operations.
 
-Then commit the migration file along with your model changes.
+Apply it locally with `uv run python -m yaai.server.migrate`, then commit the migration file along with your model changes.
 
 ## Commits
 

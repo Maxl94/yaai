@@ -1,8 +1,9 @@
 import logging
 import uuid
+from typing import NoReturn
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,6 +19,7 @@ from yaai.schemas.model import (
 from yaai.server.models.inference import InferenceData
 from yaai.server.models.job import DriftResult, JobConfig
 from yaai.server.models.model import Model, ModelVersion, SchemaField
+from yaai.server.models.project import Project
 
 logger = logging.getLogger(__name__)
 
@@ -28,30 +30,42 @@ class ModelService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_model(self, data: ModelCreate) -> Model:
-        """Create a new model record.
+    async def create_model(self, data: ModelCreate, project_id: uuid.UUID) -> Model:
+        """Create a new model record in a project.
 
         Args:
             data: Validated model creation payload.
+            project_id: Project the model belongs to (must exist and be authorized by the caller).
 
         Returns:
             The newly created Model with eagerly loaded relations.
+
+        Raises:
+            HTTPException: 404 if the project was deleted concurrently, 409 if the project already contains a
+                model with this name.
         """
-        model = Model(name=data.name, description=data.description)
+        model = Model(name=data.name, description=data.description, project_id=project_id)
         self.db.add(model)
         try:
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
-            raise HTTPException(status_code=409, detail="Model with this name already exists") from None
+            await self._raise_project_gone_or_name_clash(project_id)
         return await self.get_model(model.id)
+
+    async def _raise_project_gone_or_name_clash(self, project_id: uuid.UUID) -> NoReturn:
+        """Map an IntegrityError of a model write: missing project (foreign key) -> 404, otherwise name clash -> 409."""
+        if (await self.db.execute(select(Project.id).where(Project.id == project_id))).first() is None:
+            raise HTTPException(status_code=404, detail="Project not found") from None
+        raise HTTPException(status_code=409, detail="Model with this name already exists in this project") from None
 
     async def list_models(
         self,
         page: int = 1,
         page_size: int = 20,
         search: str | None = None,
-        model_ids: list[uuid.UUID] | None = None,
+        model_ids: Select | None = None,
+        project_id: uuid.UUID | None = None,
     ):
         """Return a paginated list of model summaries with inference counts.
 
@@ -59,7 +73,8 @@ class ModelService:
             page: 1-based page index.
             page_size: Maximum number of results per page.
             search: Optional case-insensitive name filter.
-            model_ids: If provided, only return models with these IDs (SA filtering).
+            model_ids: If provided, only return models with these IDs (access filtering).
+            project_id: If provided, only return models of this project.
 
         Returns:
             A tuple of (list of summary dicts, total count).
@@ -69,6 +84,8 @@ class ModelService:
             query = query.where(Model.name.ilike(f"%{search}%"))
         if model_ids is not None:
             query = query.where(Model.id.in_(model_ids))
+        if project_id is not None:
+            query = query.where(Model.project_id == project_id)
 
         count_query = select(func.count()).select_from(query.subquery())
         total = (await self.db.execute(count_query)).scalar_one()
@@ -92,6 +109,8 @@ class ModelService:
                     "id": model.id,
                     "name": model.name,
                     "description": model.description,
+                    "project_id": model.project_id,
+                    "project_name": model.project_name,
                     "created_at": model.created_at,
                     "updated_at": model.updated_at,
                     "active_version": active_version,
@@ -114,7 +133,9 @@ class ModelService:
         return model
 
     async def update_model(self, model_id: uuid.UUID, data: ModelUpdate) -> Model:
-        """Partially update a model's name and/or description.
+        """Partially update a model's name, description and/or project.
+
+        The caller must have authorized a project change (global owners only).
 
         Args:
             model_id: Primary key of the model to update.
@@ -124,9 +145,14 @@ class ModelService:
             The refreshed Model after committing changes.
 
         Raises:
-            HTTPException: 404 if the model does not exist.
+            HTTPException: 404 if the model or target project does not exist, 409 on a name clash in the project.
         """
         model = await self.get_model(model_id)
+        if data.project_id is not None and data.project_id != model.project_id:
+            if await self.db.get(Project, data.project_id) is None:
+                raise HTTPException(status_code=404, detail="Project not found")
+            model.project_id = data.project_id
+        target_project_id = model.project_id
         if data.name is not None:
             model.name = data.name
         if data.description is not None:
@@ -135,7 +161,8 @@ class ModelService:
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
-            raise HTTPException(status_code=409, detail="Model with this name already exists") from None
+            await self._raise_project_gone_or_name_clash(target_project_id)
+        self.db.expire(model)  # reload the project relationship after a move
         return await self.get_model(model_id)
 
     async def delete_model(self, model_id: uuid.UUID) -> None:
@@ -342,6 +369,8 @@ class ModelService:
 
         for existing_field in version.schema_fields:
             await self.db.delete(existing_field)
+        # Unit of work runs INSERTs before DELETEs; flush so reused field names don't hit uq_schema_field.
+        await self.db.flush()
 
         for field_data in fields:
             field = SchemaField(

@@ -41,7 +41,8 @@ test.describe('Settings - Users', () => {
     // Find viewer row and click edit button
     const viewerRow = page.locator('tr', { hasText: seed.viewer.username })
     await expect(viewerRow).toBeVisible({ timeout: 10000 })
-    await viewerRow.locator('button').click()
+    // The row has edit and delete buttons; edit comes first
+    await viewerRow.locator('button').first().click()
 
     // Edit dialog should appear with viewer info
     const dialog = page.locator('.v-dialog').filter({ hasText: 'Edit User' })

@@ -16,7 +16,6 @@ export interface LoginRequest {
 
 export interface TokenResponse {
   access_token: string
-  refresh_token: string
   token_type: string
   user: AuthUser
 }
@@ -85,7 +84,41 @@ export interface Model {
   versions?: ModelVersionSummary[]
   active_version?: ModelVersionSummary | null
   total_inferences?: number
+  project_id?: string | null
+  project_name?: string | null
 }
+
+// Project types
+export type ProjectRole = 'owner' | 'editor' | 'viewer'
+
+export interface Project {
+  id: string
+  name: string
+  description: string | null
+  is_default: boolean
+  model_count: number
+  my_role: ProjectRole | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectMember {
+  id: string
+  project_id: string
+  principal_type: 'user' | 'service_account'
+  user_id: string | null
+  service_account_id: string | null
+  name: string
+  email: string | null
+  role: ProjectRole
+  created_at: string
+}
+
+export type ProjectMemberCreate = { role: ProjectRole } & (
+  | { user_id: string }
+  | { username: string }
+  | { service_account_id: string }
+)
 
 export interface ModelVersionSummary {
   id: string
@@ -136,6 +169,8 @@ export interface Inference {
 export interface JobConfig {
   id: string
   model_version_id: string
+  model_id: string
+  project_id: string
   name: string
   schedule: string
   comparison_type: 'vs_reference' | 'rolling_window'
@@ -191,6 +226,8 @@ export interface HistogramBucket {
   range_start: number
   range_end: number
   count: number
+  is_underflow?: boolean
+  is_overflow?: boolean
 }
 
 export interface NumericalStatistics {

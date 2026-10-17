@@ -105,6 +105,10 @@ Demo data generation complete!
 ============================================================
 ```
 
+## LLM monitoring scripts
+
+`llm_monitoring_example.py` is a runnable end-to-end example (model, version, baseline, shifted period, drift job and run) that sends metadata only; `llm_reporter_example.py` is the tested batching reporter to copy into your app, not a runnable script. Usage, options (`--base-url`, `--api-key`, `--records`, ...) and API key requirements: [LLM & Agent Monitoring](../docs/llm-monitoring.md).
+
 ## Future Modes
 
 Additional modes planned for future implementation:

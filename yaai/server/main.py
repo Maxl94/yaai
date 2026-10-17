@@ -1,32 +1,31 @@
 import importlib.metadata
 import logging
 import os
-import secrets as _secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from alembic import command
-from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
 
-from yaai.server import database
+from yaai.server import database, startup
+from yaai.server.admin_bootstrap import deliver_generated_password, resolve_admin_password
 from yaai.server.auth.config import load_auth_config, validate_auth_config
 from yaai.server.auth.dependencies import set_auth_config
 from yaai.server.auth.oauth import setup_oauth
 from yaai.server.auth.passwords import hash_password
-from yaai.server.config import settings
+from yaai.server.config import api_docs_enabled, resolve_session_secret, settings
 from yaai.server.models import auth as _auth_models  # noqa: F401
+from yaai.server.models import project as _project_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, User, UserRole
 from yaai.server.rate_limit import limiter
-from yaai.server.routers import auth, dashboard, inferences, jobs, models, schema
-from yaai.server.scheduler import load_active_jobs, scheduler
+from yaai.server.routers import auth, dashboard, inferences, jobs, models, projects, schema
+from yaai.server.scheduler import scheduler_enabled
+from yaai.server.security_headers import SecurityHeadersMiddleware, security_headers_enabled
+from yaai.server.spa import mount_spa
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -35,84 +34,43 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-_SERVER_DIR = Path(__file__).resolve().parent
-
-
-def _apply_migrations() -> None:
-    """Run Alembic migrations up to head.
-
-    Called on startup to ensure the database schema is always up to date.
-    Disable by setting AUTO_MIGRATE=false.
-
-    For Cloud SQL, uses a standalone sync Connector (via create_sync_engine)
-    so it never interferes with the async Connector's event loop.
-    """
-    alembic_cfg = AlembicConfig(str(_SERVER_DIR / "alembic.ini"))
-    try:
-        if settings.cloud_sql_instance:
-            from yaai.server.cloud_sql import CloudSQLConnector  # noqa: PLC0415
-
-            engine = CloudSQLConnector.create_sync_engine()
-            with engine.begin() as connection:
-                alembic_cfg.attributes["connection"] = connection
-                command.upgrade(alembic_cfg, "head")
-        else:
-            alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url_sync)
-            command.upgrade(alembic_cfg, "head")
-    except BaseException:
-        logger.exception("Failed to apply database migrations")
-        raise
 
 
 async def _bootstrap_admin() -> None:
     """Create a default admin user if the users table is empty.
 
-    Generates a random password and logs it once. The admin should change
-    it immediately after first login.
+    Uses BOOTSTRAP_ADMIN_PASSWORD if set, otherwise generates a random password and
+    stores it in a new 0600 file (never logged; stderr only as a one-time fallback).
+    The admin should change it after first login.
     """
     async with database.async_session() as db:
         result = await db.execute(select(User).limit(1))
         if result.scalars().first() is not None:
             return
 
-        password = _secrets.token_urlsafe(16)
+        # Deliver the password before creating the user so a failure never leaves an admin with an unknown password
+        password, generated = resolve_admin_password()
         admin = User(
             username="admin",
             hashed_password=hash_password(password),
             role=UserRole.OWNER,
             auth_provider=AuthProvider.LOCAL,
         )
+        password_file = deliver_generated_password(password) if generated else None
         db.add(admin)
-        await db.commit()
-        logger.info(
-            "Created default admin account — username: admin, password: %s  "
-            "(change this immediately after first login)",
-            password,
-        )
+        try:
+            await db.commit()
+        except Exception:
+            if password_file is not None:
+                password_file.unlink(missing_ok=True)
+            raise
+        if not generated:
+            logger.info("Created default admin account (username: admin) with BOOTSTRAP_ADMIN_PASSWORD.")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    cloud_sql = None
-
-    # Apply database migrations on startup (disable with AUTO_MIGRATE=false)
-    if os.environ.get("AUTO_MIGRATE", "true").lower() in ("true", "1", "yes"):
-        logger.info("Applying database migrations...")
-        _apply_migrations()
-        logger.info("Database migrations applied successfully.")
-    else:
-        logger.info("AUTO_MIGRATE is disabled — skipping automatic migrations.")
-
-    # Initialize Cloud SQL async connector
-    if settings.cloud_sql_instance:
-        from yaai.server.cloud_sql import CloudSQLConnector  # noqa: PLC0415
-
-        cloud_sql = CloudSQLConnector()
-        await cloud_sql.startup()
-        database.init_engine(async_creator=cloud_sql.async_creator)
-        logger.info("Cloud SQL connector ready.")
-    else:
-        logger.info("Using DATABASE_URL (no Cloud SQL connector).")
+    cloud_sql = await startup.init_database()
 
     # Load auth configuration (skip if already pre-set, e.g. by tests)
     from yaai.server.auth.dependencies import _auth_config as _existing  # noqa: PLC0415
@@ -135,22 +93,23 @@ async def lifespan(app: FastAPI):
     if auth_config.enabled and auth_config.local_enabled:
         await _bootstrap_admin()
 
-    # Start job scheduler
-    logger.info("Loading active jobs ...")
-    async with database.async_session() as db:
-        await load_active_jobs(db)
-    scheduler.start()
+    # Start job scheduler (SCHEDULER_ENABLED=false for API-only instances)
+    if scheduler_enabled():
+        await startup.start_scheduler()
+    else:
+        logger.info("SCHEDULER_ENABLED is false — scheduled jobs will not run on this instance.")
     logger.info("Startup complete.")
 
     yield
 
-    scheduler.shutdown(wait=False)
-
-    if cloud_sql:
-        await cloud_sql.shutdown()
+    await startup.shutdown(cloud_sql)
 
 
+_docs_enabled = api_docs_enabled()
 app = FastAPI(
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
     title="YAAI Monitoring",
     description="Yet Another AI Monitoring — schema-driven ML model monitoring platform",
     version=importlib.metadata.version("yaai-monitoring"),
@@ -170,25 +129,24 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
 # Session middleware required for OAuth state (authlib uses it)
-_session_secret = os.environ.get("SESSION_SECRET")
-if not _session_secret or _session_secret == "dev-session-secret-change-me":  # noqa: S105
-    _session_secret = _secrets.token_urlsafe(32)
-    logger.warning(
-        "SESSION_SECRET not configured — generated ephemeral secret. "
-        "OAuth state will NOT survive restarts. Set SESSION_SECRET for persistence."
-    )
+_session_secret = resolve_session_secret()
 app.add_middleware(SessionMiddleware, secret_key=_session_secret)
+
+# Added last so it wraps every other middleware and response
+if security_headers_enabled():
+    app.add_middleware(SecurityHeadersMiddleware, base_url=settings.base_url, docs_enabled=_docs_enabled)
 
 # Routers
 API_PREFIX = "/api/v1"
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(models.router, prefix=API_PREFIX)
+app.include_router(projects.router, prefix=API_PREFIX)
 app.include_router(inferences.router, prefix=API_PREFIX)
 app.include_router(jobs.router, prefix=API_PREFIX)
 app.include_router(dashboard.router, prefix=API_PREFIX)
@@ -202,14 +160,4 @@ async def health():
 
 # Serve frontend static files (built by Vite, copied into yaai/server/static in Docker)
 if STATIC_DIR.is_dir():
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        # Prevent path traversal attacks
-        file_path = (STATIC_DIR / full_path).resolve()
-        if not str(file_path).startswith(str(STATIC_DIR.resolve())):
-            return FileResponse(STATIC_DIR / "index.html")
-        if file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(STATIC_DIR / "index.html")
+    mount_spa(app, STATIC_DIR, API_PREFIX)

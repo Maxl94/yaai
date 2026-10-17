@@ -36,6 +36,10 @@ VIEWER_USERNAME = "viewer"
 VIEWER_PASSWORD = os.environ.get("E2E_VIEWER_PASSWORD", "viewer-pass-123")
 VIEWER_EMAIL = "viewer@e2e-test.local"
 
+# The viewer is deliberately not a member of this project
+OTHER_PROJECT_NAME = "e2e-other"
+HIDDEN_MODEL_NAME = "E2E-Hidden-Model"
+
 
 def _wait_for_health(base_url: str, retries: int = 30, interval: float = 2.0) -> None:
     """Poll /health until the backend is ready."""
@@ -64,7 +68,8 @@ def _clean_db(dsn: str) -> None:
                          refresh_tokens, drift_results, notifications,
                          job_runs, job_configs, ground_truth,
                          reference_data, inference_data, schema_fields,
-                         model_versions, models, users
+                         model_versions, models, project_memberships,
+                         projects, users
                 CASCADE
                 """
             )
@@ -190,6 +195,34 @@ def main() -> None:
     model_b_id = model_b_resp.json()["data"]["id"]
     print(f"  Model-B: {model_b_id}")
 
+    print("7b. Adding viewer to the project of the models (default project)...")
+    r = client.get(f"{base_url}/api/v1/projects", headers=headers)
+    assert r.status_code == 200, f"List projects failed: {r.text}"
+    default_project_id = next(p["id"] for p in r.json()["data"] if p["is_default"])
+    r = client.post(
+        f"{base_url}/api/v1/projects/{default_project_id}/members",
+        json={"username": VIEWER_USERNAME, "role": "viewer"},
+        headers=headers,
+    )
+    assert r.status_code == 201, f"Add viewer to default project failed: {r.status_code} {r.text}"
+
+    print("7c. Creating a second project the viewer is NOT a member of, with one model...")
+    r = client.post(
+        f"{base_url}/api/v1/projects",
+        json={"name": OTHER_PROJECT_NAME, "description": "Not visible to the viewer"},
+        headers=headers,
+    )
+    assert r.status_code == 201, f"Create other project failed: {r.status_code} {r.text}"
+    other_project_id = r.json()["data"]["id"]
+    r = client.post(
+        f"{base_url}/api/v1/models",
+        json={"name": HIDDEN_MODEL_NAME, "project_id": other_project_id},
+        headers=headers,
+    )
+    assert r.status_code == 201, f"Create hidden model failed: {r.status_code} {r.text}"
+    hidden_model_id = r.json()["data"]["id"]
+    print(f"  Project {OTHER_PROJECT_NAME}: {other_project_id}, model {HIDDEN_MODEL_NAME}: {hidden_model_id}")
+
     print("8. Granting model access...")
     r = client.post(
         f"{base_url}/api/v1/auth/models/{model_a_id}/access",
@@ -274,6 +307,8 @@ def main() -> None:
         "sa2": {"id": sa2_id, "key": sa2_key, "name": "e2e-sa-2"},
         "model_a": {"id": model_a_id, "name": "E2E-Model-A"},
         "model_b": {"id": model_b_id, "name": "E2E-Model-B"},
+        "other_project": {"id": other_project_id, "name": OTHER_PROJECT_NAME},
+        "hidden_model": {"id": hidden_model_id, "name": HIDDEN_MODEL_NAME},
         "version_a": {"id": version_a_id, "version": "v1.0"},
         "job_a": {"id": job_a_id},
     }

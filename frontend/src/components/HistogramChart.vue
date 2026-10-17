@@ -6,26 +6,37 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { HistogramData } from '@/types'
+import {
+  DIRECTION_COLORS,
+  bucketTooltipTitle,
+  countAxis,
+  countBarStyle,
+  formatBucketLabels,
+  plotCount,
+  type FieldDirection,
+} from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 const props = defineProps<{
   data: HistogramData
   fieldName: string
+  direction?: FieldDirection
+  logScale?: boolean
 }>()
 
 const option = computed(() => {
   const buckets = props.data.buckets
-  
+  const { base: BAR_COLOR, muted: OUTLIER_COLOR } = DIRECTION_COLORS[props.direction ?? 'input']
+
   return {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       formatter: (params: { dataIndex: number }[]) => {
-        const idx = params[0]?.dataIndex ?? 0
-        const bucket = buckets[idx]
+        const bucket = buckets[params[0]?.dataIndex ?? 0]
         if (!bucket) return ''
-        return `${bucket.range_start.toFixed(2)} - ${bucket.range_end.toFixed(2)}<br/>Count: ${bucket.count}`
+        return `${bucketTooltipTitle(bucket)}<br/>Count: ${bucket.count}`
       },
     },
     grid: {
@@ -36,25 +47,31 @@ const option = computed(() => {
     },
     xAxis: {
       type: 'category',
-      data: buckets.map((b) => `${b.range_start.toFixed(1)}`),
+      data: formatBucketLabels(buckets),
       axisLabel: {
-        rotate: 45,
         fontSize: 10,
+        interval: 'auto',
+        hideOverlap: true,
+        overflow: 'truncate',
+        width: 56,
       },
     },
-    yAxis: {
-      type: 'value',
-      name: 'Count',
-    },
+    yAxis: countAxis(props.logScale),
     series: [
       {
         name: 'Count',
         type: 'bar',
-        data: buckets.map((b) => b.count),
-        itemStyle: {
-          color: '#0d9488',
-        },
+        data: buckets.map((b) => {
+          const isOutlier = b.is_underflow || b.is_overflow
+          return {
+            value: plotCount(b.count, props.logScale),
+            itemStyle: isOutlier
+              ? { color: OUTLIER_COLOR, borderColor: BAR_COLOR, borderType: 'dashed', borderWidth: 1 }
+              : { color: BAR_COLOR },
+          }
+        }),
         barWidth: '90%',
+        ...countBarStyle(props.logScale),
       },
     ],
   }

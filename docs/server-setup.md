@@ -59,13 +59,11 @@ Edit `.env` and set the values below. The defaults work for local development wi
 
 ### Optional variables
 
+Secrets, bootstrap admin password, security headers, rate limiting and scheduler settings are described in the [Configuration reference](configuration.md#security-and-multi-instance-operation). Further common variables:
+
 | Variable | Default | Description |
 |---|---|---|
-| `AUTH_JWT_SECRET` | *(auto-generated)* | Secret for signing JWT tokens. If not set, an ephemeral secret is generated on startup (sessions won't survive restarts). Generate with `openssl rand -base64 32`. |
-| `SESSION_SECRET` | *(auto-generated)* | Secret for session middleware (OAuth state). Same behavior as JWT secret. |
 | `CORS_ALLOWED_ORIGINS` | *(derived from BASE_URL)* | Comma-separated allowed CORS origins. Only set if you need origins different from BASE_URL. |
-| `AUTO_MIGRATE` | `true` | Run Alembic migrations automatically on startup |
-| `ENVIRONMENT` | `development` | Set to `production` to enforce secure credentials |
 | `AUTH_ENABLED` | `true` | Master auth switch |
 | `AUTH_LOCAL_ALLOW_REGISTRATION` | `false` | Allow public user registration |
 | `AUTH_SERVICE_ACCOUNTS_API_KEYS_ENABLED` | `true` | Enable API key authentication |
@@ -77,24 +75,36 @@ Edit `.env` and set the values below. The defaults work for local development wi
 > - **Local auth** — enabled automatically unless Google OAuth is configured
 > - **CORS origins** — defaults to `BASE_URL`
 > - **SA audience** — defaults to `BASE_URL`
-> - **Admin password** — auto-generated and logged on first startup
+> - **Admin password** — auto-generated and written to a 0600 file on first startup (never logged)
 > - **JWT algorithm** — hardcoded to HS256 (not configurable)
 > - **Token expiry** — hardcoded to 60 min (access) / 30 days (refresh)
 
-## 4. Start the server
+## 4. Run database migrations and start the server
+
+The server does **not** migrate the database on startup. Apply the migrations first, and again after every upgrade:
+
+```bash
+uv run python -m yaai.server.migrate
+```
+
+Then start the server:
 
 ```bash
 uv run uvicorn yaai.server.main:app --reload --reload-dir yaai --host 0.0.0.0 --port 8000
 ```
 
-On first startup, the server will:
+On startup, the server checks that the database schema is at the latest migration and exits with an error if it is not. On first startup, it will also:
 
-1. **Run database migrations** automatically (unless `AUTO_MIGRATE=false`)
-2. **Create a default admin account** with the username `admin` and a randomly generated password (check the server logs for the password)
+1. **Create a default admin account** with the username `admin` and a randomly generated password (written to a file, see [Default admin account](#default-admin-account))
 
 Open **http://localhost:8000** -- you should see the login screen.
 
-API docs are available at **http://localhost:8000/docs** (Swagger UI).
+API docs are available at **http://localhost:8000/docs** (Swagger UI) in development. They are disabled by default when `ENVIRONMENT=production` (see `API_DOCS_ENABLED`).
+
+> [!NOTE]
+> Upgrading from a version without projects: the migration creates a `default` project that contains all existing models and
+> makes every existing user a **viewer** of it, so everybody keeps reading all models (global owners keep full access).
+> Service accounts keep their per-model access. Downgrading fails if two projects contain models with the same name.
 
 ## 5. Start the frontend (development only)
 
@@ -113,14 +123,18 @@ The frontend runs on **http://localhost:3000** and proxies `/api` requests to th
 
 Out of the box, the server uses **local authentication** (username + password) with **API key auth** enabled for service accounts.
 
+### Projects and access
+
+Models live in projects (see [Core Concepts](concepts.md#projects)). Global owners create projects and add members (`POST /api/v1/projects`, `POST /api/v1/projects/{id}/members`); project owners manage the members of their own projects. Newly created users -- also those auto-created on their first Google login -- are **not** members of any project and see no models until they are added to one.
+
 ### Default admin account
 
 On first startup (when no users exist), the server creates an admin account:
 
 - **Username**: `admin`
-- **Password**: randomly generated -- check the server logs for the password
+- **Password**: `BOOTSTRAP_ADMIN_PASSWORD` if set, otherwise a random password written to `BOOTSTRAP_ADMIN_PASSWORD_FILE` (default `./admin-initial-password.txt` in the server's working directory) -- see [Configuration](configuration.md#security-and-multi-instance-operation).
 
-Change the password immediately after first login.
+Change the password immediately after first login and delete the file. With the repo's `docker compose`, the file lives in the container: `docker compose exec backend cat /home/appuser/admin-initial-password.txt`.
 
 ### API keys
 
@@ -196,5 +210,8 @@ API_KEY=your_key uv run scripts/generate_demo_data_sdk.py --drop-all --mode full
 **"FATAL: Database URL contains default credentials"**
 : You're running with `ENVIRONMENT=production` but haven't changed the default `changeme` password. Set `DATABASE_URL` with secure credentials.
 
-**Migrations fail on startup**
-: Check that PostgreSQL is running and `DATABASE_URL` is correct. You can disable auto-migration with `AUTO_MIGRATE=false` and run manually: `uv run alembic upgrade head`.
+**"Database schema is not up to date" on startup**
+: The server no longer applies migrations automatically. Run `uv run python -m yaai.server.migrate` and start the server again.
+
+**Migrations fail**
+: Check that PostgreSQL is running and `DATABASE_URL` is correct.

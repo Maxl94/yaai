@@ -22,6 +22,8 @@ class HistogramBucket(BaseModel):
     range_start: float
     range_end: float
     count: int
+    is_underflow: bool = False
+    is_overflow: bool = False
 
 
 class HistogramData(BaseModel):

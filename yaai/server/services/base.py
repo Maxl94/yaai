@@ -18,7 +18,6 @@ from yaai.server.models.model import ModelVersion, SchemaField
 from yaai.server.schemas.dashboard import (
     CategoricalStatistics,
     CategoryCount,
-    HistogramBucket,
     NumericalStatistics,
 )
 
@@ -220,18 +219,6 @@ class BaseService:
             fields,
             key=lambda f: (0 if f.direction == FieldDirection.INPUT else 1, f.field_name),
         )
-
-    @staticmethod
-    def build_histogram_buckets(edges: np.ndarray, counts: np.ndarray) -> list[HistogramBucket]:
-        """Build histogram buckets from numpy edges and counts arrays."""
-        return [
-            HistogramBucket(
-                range_start=round(float(edges[i]), 4),
-                range_end=round(float(edges[i + 1]), 4),
-                count=int(counts[i]),
-            )
-            for i in range(len(edges) - 1)
-        ]
 
     @staticmethod
     def compute_numerical_statistics(

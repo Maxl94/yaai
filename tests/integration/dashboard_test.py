@@ -145,3 +145,31 @@ async def test_dashboard_rejects_version_of_other_model(client: AsyncClient):
 
     resp = await client.get(f"/api/v1/models/{model_a['id']}/versions/{version_b['id']}/dashboard")
     assert resp.status_code == 404
+
+
+async def test_numerical_panel_includes_empty_buckets_and_overflow(client: AsyncClient):
+    model = await create_model(client, name="outlier-model")
+    version = await create_version(client, model["id"])
+    now = datetime.now(UTC)
+    ages = [20 + (i % 10) for i in range(200)] + [5000]
+    for i, age in enumerate(ages):
+        await client.post(
+            "/api/v1/inferences",
+            json={
+                "model_version_id": version["id"],
+                "inputs": {"age": age, "gender": "male"},
+                "outputs": {"score": 0.5},
+                "timestamp": (now - timedelta(minutes=i)).isoformat(),
+            },
+        )
+
+    resp = await client.get(f"/api/v1/models/{model['id']}/versions/{version['id']}/dashboard")
+    age_panel = next(p for p in resp.json()["data"]["panels"] if p["field_name"] == "age")
+    buckets = age_panel["data"]["buckets"]
+
+    assert len(buckets) == 21  # 20 regular bins (incl. empty ones) + overflow
+    assert buckets[-1]["is_overflow"] is True
+    assert buckets[-1]["count"] == 1
+    assert buckets[-1]["range_end"] == 5000
+    assert any(b["count"] == 0 for b in buckets)
+    assert sum(b["count"] for b in buckets) == 201
