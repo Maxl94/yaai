@@ -702,3 +702,33 @@ async def test_sa_cannot_grant_access(owner_client: AsyncClient, pg_session_fact
             json={"service_account_id": sa_id},
         )
         assert resp.status_code == 403
+
+
+# Version comparison
+
+
+async def test_sa_cannot_compare_against_version_without_access(
+    owner_client: AsyncClient, pg_session_factory: async_sessionmaker
+):
+    sa_id, raw_key = await _create_sa(owner_client, "compare-sa")
+    model_a = await _create_model(owner_client, "compare-model-a")
+    model_b = await _create_model(owner_client, "compare-model-b")
+    version_a = await _create_version(owner_client, model_a["id"])
+    version_b = await _create_version(owner_client, model_b["id"])
+    await _grant_access(owner_client, model_a["id"], sa_id)  # no grant on model B
+
+    ts = "2026-01-01T00:00:00+00:00"
+    params = {
+        "mode": "vs_version",
+        "other_model_id": model_b["id"],
+        "other_version_id": version_b["id"],
+        "from_a": ts,
+        "to_a": ts,
+        "from_b": ts,
+        "to_b": ts,
+    }
+    async with await _make_sa_client(pg_session_factory, raw_key) as sa_client:
+        resp = await sa_client.get(
+            f"/api/v1/models/{model_a['id']}/versions/{version_a['id']}/dashboard/compare", params=params
+        )
+        assert resp.status_code == 403

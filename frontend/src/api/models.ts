@@ -6,6 +6,17 @@ async function list(params: { project_id?: string } = {}): Promise<Model[]> {
   return response.data.data
 }
 
+async function listAll(): Promise<Model[]> {
+  const pageSize = 100
+  const models: Model[] = []
+  for (let page = 1; ; page++) {
+    const response = await client.get<PaginatedResponse<Model>>('/models', { params: { page, page_size: pageSize } })
+    const { data, meta } = response.data
+    models.push(...data)
+    if (!data.length || models.length >= meta.total) return models
+  }
+}
+
 async function get(modelId: string): Promise<Model> {
   const response = await client.get<ApiResponse<Model>>(`/models/${modelId}`)
   return response.data.data
@@ -100,6 +111,7 @@ async function getInferenceVolume(
 
 export const modelsApi = {
   list,
+  listAll,
   get,
   create,
   update,

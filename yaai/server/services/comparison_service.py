@@ -64,7 +64,7 @@ class ComparisonPanel:
 
 
 class ComparisonService(BaseService):
-    """Compares inference distributions across time windows or against reference data."""
+    """Compares inference distributions across time windows, reference data, or model versions."""
 
     def __init__(self, db: AsyncSession):
         super().__init__(db)
@@ -137,6 +137,66 @@ class ComparisonService(BaseService):
             total_count_a=total_inferences,
             total_count_b=total_reference,
         )
+
+    @staticmethod
+    def diff_schemas(fields_a: list[SchemaField], fields_b: list[SchemaField]) -> tuple[list[SchemaField], list[dict]]:
+        """Split two schemas into comparable fields (side A's objects) and a schema diff.
+
+        Fields match on (direction, field_name); renames are not detected.
+        """
+        by_key_a = {(f.direction, f.field_name): f for f in fields_a}
+        by_key_b = {(f.direction, f.field_name): f for f in fields_b}
+
+        comparable = []
+        diff = []
+        for key in sorted(by_key_a.keys() | by_key_b.keys(), key=lambda k: (k[0].value, k[1])):
+            field_a, field_b = by_key_a.get(key), by_key_b.get(key)
+            if field_a and field_b and field_a.data_type == field_b.data_type:
+                comparable.append(field_a)
+                continue
+            if field_a and field_b:
+                status = "type_changed"
+            else:
+                status = "only_in_a" if field_a else "only_in_b"
+            diff.append(
+                {
+                    "field_name": key[1],
+                    "direction": key[0].value,
+                    "status": status,
+                    "data_type_a": field_a.data_type.value if field_a else None,
+                    "data_type_b": field_b.data_type.value if field_b else None,
+                }
+            )
+        return comparable, diff
+
+    async def compare_versions(
+        self,
+        version_a_id: uuid.UUID,
+        version_b_id: uuid.UUID,
+        from_a: datetime,
+        to_a: datetime,
+        from_b: datetime,
+        to_b: datetime,
+    ) -> tuple[list[dict], list[dict]]:
+        """Compare two versions' distributions on their shared fields; return (panels, schema_diff)."""
+        version_a = await self.get_version_with_schema(version_a_id)
+        version_b = await self.get_version_with_schema(version_b_id)
+        comparable, schema_diff = self.diff_schemas(version_a.schema_fields, version_b.schema_fields)
+
+        max_s = settings.drift_max_samples
+        inferences_a = await self.load_inferences_sampled(version_a_id, from_a, to_a, max_s)
+        inferences_b = await self.load_inferences_sampled(version_b_id, from_b, to_b, max_s)
+        total_a = await self.count_inferences(version_a_id, from_a, to_a)
+        total_b = await self.count_inferences(version_b_id, from_b, to_b)
+
+        panels = self._build_comparison_panels(
+            comparable,
+            inferences_a,
+            inferences_b,
+            total_count_a=total_a,
+            total_count_b=total_b,
+        )
+        return panels, schema_diff
 
     def _build_comparison_panels(
         self,

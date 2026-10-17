@@ -1,5 +1,5 @@
 import client from './client'
-import type { DashboardResponse, ComparisonPanel, ApiResponse } from '@/types'
+import type { DashboardResponse, ComparisonResponse, ApiResponse } from '@/types'
 
 async function getDashboard(
   modelId: string,
@@ -17,14 +17,16 @@ async function getComparison(
   modelId: string,
   versionId: string,
   params: {
-    mode: 'time_window' | 'vs_reference'
+    mode: 'time_window' | 'vs_reference' | 'vs_version'
     from_a: string
     to_a: string
     from_b?: string
     to_b?: string
+    other_model_id?: string
+    other_version_id?: string
   }
-): Promise<{ panels: ComparisonPanel[] }> {
-  const response = await client.get<ApiResponse<{ panels: ComparisonPanel[] }>>(
+): Promise<ComparisonResponse> {
+  const response = await client.get<ApiResponse<ComparisonResponse>>(
     `/models/${modelId}/versions/${versionId}/dashboard/compare`,
     { params }
   )

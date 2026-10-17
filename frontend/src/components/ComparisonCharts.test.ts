@@ -75,3 +75,19 @@ describe("comparison charts with log scale", () => {
     expect(option.tooltip.formatter(rows)).toContain("Period B: 0");
   });
 });
+
+describe("OverlaidHistogram legend", () => {
+  it("colors each series like its bars so the legend matches", () => {
+    const option = optionOf(OverlaidHistogram, {
+      dataA: histogram([1]),
+      dataB: histogram([2]),
+      logScale: false,
+    }) as unknown as {
+      series: { itemStyle: { color: string }; data: { itemStyle: { color: string } }[] }[];
+    };
+    for (const s of option.series) {
+      expect(s.itemStyle.color).toBe(s.data[0]!.itemStyle.color);
+    }
+    expect(option.series[0]!.itemStyle.color).not.toBe(option.series[1]!.itemStyle.color);
+  });
+});

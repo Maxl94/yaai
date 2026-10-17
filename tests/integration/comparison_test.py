@@ -58,6 +58,7 @@ async def test_compare_time_windows(client: AsyncClient):
     data = resp.json()["data"]
     panels = data["panels"]
     assert len(panels) == 3  # age, gender, score
+    assert data["schema_diff"] == []
 
     # Each panel should have data_a and data_b
     for panel in panels:
@@ -195,3 +196,125 @@ async def test_compare_histograms_share_edges_and_all_bins(client: AsyncClient):
     assert sum(b["count"] for b in buckets_a) == 10
     assert sum(b["count"] for b in buckets_b) == 10
     assert any(b["count"] == 0 for b in buckets_a)
+
+
+async def _create_version_with_schema(client: AsyncClient, model_id: str, schema: list[dict]) -> str:
+    resp = await client.post(f"/api/v1/models/{model_id}/versions", json={"version": "v2.0", "schema": schema})
+    assert resp.status_code == 201
+    return resp.json()["data"]["id"]
+
+
+async def _ingest(client: AsyncClient, version_id: str, inputs: dict, outputs: dict, ts: datetime):
+    resp = await client.post(
+        "/api/v1/inferences",
+        json={"model_version_id": version_id, "inputs": inputs, "outputs": outputs, "timestamp": ts.isoformat()},
+    )
+    assert resp.status_code in (200, 201)
+
+
+def _vs_version_params(other_model_id: str, other_version_id: str, now: datetime) -> dict:
+    return {
+        "mode": "vs_version",
+        "other_model_id": other_model_id,
+        "other_version_id": other_version_id,
+        "from_a": (now - timedelta(days=1)).isoformat(),
+        "to_a": now.isoformat(),
+        "from_b": (now - timedelta(days=1)).isoformat(),
+        "to_b": now.isoformat(),
+    }
+
+
+async def test_compare_vs_version_across_models(client: AsyncClient):
+    model_a = await create_model(client, name="vv-model-a")
+    version_a = await create_version(client, model_a["id"])  # age, gender (in); score (out)
+    model_b = await create_model(client, name="vv-model-b")
+    version_b_id = await _create_version_with_schema(
+        client,
+        model_b["id"],
+        [
+            {"direction": "input", "field_name": "age", "data_type": "numerical"},
+            {"direction": "input", "field_name": "gender", "data_type": "numerical"},  # type changed
+            {"direction": "input", "field_name": "region", "data_type": "categorical"},  # only in b
+            {"direction": "output", "field_name": "score", "data_type": "numerical"},
+        ],
+    )
+    now = datetime.now(UTC)
+    await _ingest(client, version_a["id"], {"age": 30, "gender": "male"}, {"score": 0.5}, now - timedelta(hours=1))
+    await _ingest(
+        client, version_b_id, {"age": 40, "gender": 1, "region": "eu"}, {"score": 0.9}, now - timedelta(hours=1)
+    )
+
+    resp = await client.get(
+        f"/api/v1/models/{model_a['id']}/versions/{version_a['id']}/dashboard/compare",
+        params=_vs_version_params(model_b["id"], version_b_id, now),
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["model_version_id"] == version_a["id"]
+    assert [p["field_name"] for p in data["panels"]] == ["age", "score"]
+    age = data["panels"][0]
+    assert age["data_a"]["statistics"]["mean"] == 30
+    assert age["data_b"]["statistics"]["mean"] == 40
+    assert data["schema_diff"] == [
+        {
+            "field_name": "gender",
+            "direction": "input",
+            "status": "type_changed",
+            "data_type_a": "categorical",
+            "data_type_b": "numerical",
+        },
+        {
+            "field_name": "region",
+            "direction": "input",
+            "status": "only_in_b",
+            "data_type_a": None,
+            "data_type_b": "categorical",
+        },
+    ]
+
+
+async def test_compare_vs_version_same_model(client: AsyncClient):
+    model = await create_model(client, name="vv-same-model")
+    version_a = await create_version(client, model["id"])
+    version_b_id = await _create_version_with_schema(
+        client,
+        model["id"],
+        [
+            {"direction": "input", "field_name": "age", "data_type": "numerical"},
+            {"direction": "output", "field_name": "score", "data_type": "numerical"},
+        ],
+    )
+
+    resp = await client.get(
+        f"/api/v1/models/{model['id']}/versions/{version_a['id']}/dashboard/compare",
+        params=_vs_version_params(model["id"], version_b_id, datetime.now(UTC)),
+    )
+    data = resp.json()["data"]
+    assert [p["field_name"] for p in data["panels"]] == ["age", "score"]
+    assert [(d["direction"], d["field_name"], d["status"]) for d in data["schema_diff"]] == [
+        ("input", "gender", "only_in_a"),
+    ]
+
+
+async def test_compare_vs_version_missing_params(client: AsyncClient):
+    model = await create_model(client, name="vv-missing")
+    version = await create_version(client, model["id"])
+
+    resp = await client.get(
+        f"/api/v1/models/{model['id']}/versions/{version['id']}/dashboard/compare",
+        params={"mode": "vs_version", "from_a": datetime.now(UTC).isoformat()},
+    )
+    assert resp.status_code == 422
+
+
+async def test_compare_vs_reference_has_empty_schema_diff(client: AsyncClient):
+    model = await create_model(client, name="vr-diff")
+    version = await create_version(client, model["id"])
+    now = datetime.now(UTC)
+
+    resp = await client.get(
+        f"/api/v1/models/{model['id']}/versions/{version['id']}/dashboard/compare",
+        params={"mode": "vs_reference", "from_a": (now - timedelta(days=1)).isoformat(), "to_a": now.isoformat()},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["schema_diff"] == []

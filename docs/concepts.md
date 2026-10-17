@@ -137,6 +137,22 @@ The comparison page is the interactive counterpart to automated drift jobs. Pick
 
 This is useful for investigating shifts you've been alerted about or for ad-hoc exploration ("did anything change after last Tuesday's release?").
 
+The page offers three modes:
+
+- **Time window** -- two time ranges of the same version.
+- **vs reference** -- inference data against your reference data.
+- **Other version** -- the current version over period A against any other version you can read, on the same model or a different one (e.g. `model-xy-dev` vs `model-xy-prod`), over period B. Period B defaults to period A.
+
+Only fields with the same direction, name, and data type in both versions are compared. Other fields are listed in `schema_diff` with status `only_in_a`, `only_in_b`, or `type_changed`. Renamed fields are not detected; they appear as one removed and one added field.
+
+Without ground-truth labels, this shows distribution and behaviour differences, not which version is better.
+
+The API endpoint for version-vs-version comparison (read access required on both versions):
+
+```
+GET /api/v1/models/{model_id}/versions/{version_id}/dashboard/compare?mode=vs_version&other_model_id=...&other_version_id=...&from_a=...&to_a=...&from_b=...&to_b=...
+```
+
 ## Auto-dashboards
 
 There's no dashboard builder. When you navigate to a model version in the UI, YAAI queries inference data for every schema field and renders:
