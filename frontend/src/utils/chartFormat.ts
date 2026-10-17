@@ -148,9 +148,12 @@ export function aggregateGroupedCategories(
   return bars
 }
 
-/** Count axis; on a log axis 0 cannot be drawn, so use `plotCount` for the series data. */
+/**
+ * Count axis; on a log axis 0 cannot be drawn, so use `plotCount` for the series data. `min: 1` is the bar baseline,
+ * otherwise ECharts may pick a higher axis min and a bar at that count gets no height.
+ */
 export function countAxis(logScale?: boolean) {
-  return { type: logScale ? 'log' : 'value', name: 'Count' }
+  return logScale ? { type: 'log', name: 'Count', min: 1 } : { type: 'value', name: 'Count' }
 }
 
 /** Series value for a count: zeros are left out on a log axis (log 0 is undefined). Tooltips keep the real count. */

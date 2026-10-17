@@ -253,7 +253,7 @@ describe('aggregateGroupedCategories', () => {
 describe('count axis helpers', () => {
   it('switches the axis type and keeps the name', () => {
     expect(countAxis()).toEqual({ type: 'value', name: 'Count' })
-    expect(countAxis(true)).toEqual({ type: 'log', name: 'Count' })
+    expect(countAxis(true)).toEqual({ type: 'log', name: 'Count', min: 1 })
   })
 
   it('drops zero counts only on the log axis', () => {
