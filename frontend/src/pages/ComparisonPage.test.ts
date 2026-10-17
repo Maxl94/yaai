@@ -12,7 +12,7 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { modelId: 'm1', versionId: 'v2' } }),
 }))
 vi.mock('@/api/models', () => ({
-  modelsApi: { get: vi.fn(), getVersion: vi.fn(), listAll: vi.fn(), listVersions: vi.fn() },
+  modelsApi: { get: vi.fn(), getVersion: vi.fn(), listAll: vi.fn() },
 }))
 vi.mock('@/api/dashboard', () => ({ dashboardApi: { getComparison: vi.fn() } }))
 
@@ -131,13 +131,16 @@ describe('ComparisonPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(modelsApi.get).mockResolvedValue({ id: 'm1', name: 'Model' } as never)
+    vi.mocked(modelsApi.get).mockResolvedValue({
+      id: 'm1',
+      name: 'Model',
+      versions: [
+        { id: 'v2', version: 'v2' },
+        { id: 'v1', version: 'v1' },
+      ],
+    } as never)
     vi.mocked(modelsApi.getVersion).mockResolvedValue({ id: 'v2', version: 'v2' } as never)
     vi.mocked(modelsApi.listAll).mockResolvedValue([{ id: 'm1', name: 'Model' }] as never)
-    vi.mocked(modelsApi.listVersions).mockResolvedValue([
-      { id: 'v2', version: 'v2' },
-      { id: 'v1', version: 'v1' },
-    ] as never)
     vi.mocked(dashboardApi.getComparison).mockResolvedValue({ model_version_id: 'v2', panels: [], schema_diff: [] })
   })
 

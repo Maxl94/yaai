@@ -7,7 +7,7 @@ import OverlaidHistogram from '@/components/OverlaidHistogram.vue'
 import GroupedBarChart from '@/components/GroupedBarChart.vue'
 import StatsSummary from '@/components/StatsSummary.vue'
 import VersionNavTabs from '@/components/VersionNavTabs.vue'
-import type { Model, ModelVersion, ComparisonPanel, HistogramData, CategoricalData, SchemaDiffItem } from '@/types'
+import type { Model, ModelVersion, ModelVersionSummary, ComparisonPanel, HistogramData, CategoricalData, SchemaDiffItem } from '@/types'
 
 const route = useRoute()
 
@@ -27,16 +27,16 @@ const mode = ref<'time_window' | 'vs_reference' | 'vs_version'>('time_window')
 // Other version (vs_version mode)
 const allModels = ref<Model[]>([])
 const otherModelId = ref<string | null>(null)
-const otherVersions = ref<ModelVersion[]>([])
+const otherVersions = ref<ModelVersionSummary[]>([])
 const otherVersionId = ref<string | null>(null)
 
 // Returns false when a newer model selection superseded this one.
 async function selectOtherModel(id: string): Promise<boolean> {
   otherModelId.value = id
   otherVersionId.value = null
-  let versions: ModelVersion[] = []
+  let versions: ModelVersionSummary[] = []
   try {
-    versions = await modelsApi.listVersions(id)
+    versions = (await modelsApi.get(id)).versions ?? []
   } catch (error) {
     console.error('Failed to fetch versions:', error)
   }
