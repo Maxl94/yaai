@@ -15,12 +15,6 @@ export function setAccessToken(token: string | null) {
   accessToken = token
 }
 
-// Rotation invalidates the old refresh cookie, so concurrent refreshes (e.g. two tabs) must run one after another
-export function requestRefresh() {
-  const call = () => client.post<{ data: TokenResponse }>('/auth/refresh')
-  return navigator.locks ? navigator.locks.request('yaai-auth-refresh', call) : call()
-}
-
 // Request interceptor: attach access token from memory
 client.interceptors.request.use((config) => {
   if (accessToken && config.url && !config.url.startsWith('/auth/config') && !config.url.startsWith('/auth/login')) {
@@ -77,7 +71,7 @@ client.interceptors.response.use(
       isRefreshing = true
 
       try {
-        const response = await requestRefresh()
+        const response = await client.post<{ data: TokenResponse }>('/auth/refresh')
         const { access_token } = response.data.data
         setAccessToken(access_token)
 
@@ -102,7 +96,10 @@ client.interceptors.response.use(
       message: error.message,
       detail: error.response?.data?.detail,
     }
-    console.error('API Error:', apiError)
+    // A 401 from the startup refresh just means "not logged in"
+    if (!(apiError.status === 401 && originalRequest?.url?.startsWith('/auth/refresh'))) {
+      console.error('API Error:', apiError)
+    }
     return Promise.reject(apiError)
   }
 )

@@ -1,4 +1,4 @@
-import client, { requestRefresh } from './client'
+import client from './client'
 import type {
   AuthConfigResponse,
   TokenResponse,
@@ -20,7 +20,7 @@ async function login(credentials: LoginRequest): Promise<TokenResponse> {
 }
 
 async function refresh(): Promise<TokenResponse> {
-  const response = await requestRefresh()
+  const response = await client.post<{ data: TokenResponse }>('/auth/refresh')
   return response.data.data
 }
 

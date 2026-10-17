@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,9 @@ from yaai.server.models.auth import APIKey, AuthProvider, RefreshToken, ServiceA
 # Pre-computed bcrypt hash for timing-attack mitigation in authenticate_local().
 # This ensures non-existent user lookups take the same time as real ones.
 _DUMMY_HASH = "$2b$12$tGcQ/cij2YhgRoc0dzhb3eiC/yDPaI3oMdk270Q88g.twJZ5SA8j."
+
+# A rotated refresh token stays valid this long so a reload or second tab racing the rotation is not logged out
+ROTATION_GRACE_SECONDS = 30
 
 
 class AuthService:
@@ -164,13 +167,20 @@ class AuthService:
 
     async def validate_refresh_token(self, jti: str) -> RefreshToken | None:
         """Look up a refresh token by JTI. Returns None if not found (revoked or expired)."""
-        stmt = select(RefreshToken).where(RefreshToken.jti == jti)
+        stmt = select(RefreshToken).where(RefreshToken.jti == jti, RefreshToken.expires_at > datetime.now(UTC))
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
     async def revoke_refresh_token(self, jti: str) -> None:
         """Revoke a single refresh token by deleting its DB row."""
         await self.db.execute(delete(RefreshToken).where(RefreshToken.jti == jti))
+        await self.db.commit()
+
+    async def rotate_refresh_token(self, jti: str) -> None:
+        """Shorten a refresh token's lifetime to the rotation grace window (never extends it)."""
+        grace_end = datetime.now(UTC) + timedelta(seconds=ROTATION_GRACE_SECONDS)
+        expires_at = case((RefreshToken.expires_at > grace_end, grace_end), else_=RefreshToken.expires_at)
+        await self.db.execute(update(RefreshToken).where(RefreshToken.jti == jti).values(expires_at=expires_at))
         await self.db.commit()
 
     async def revoke_all_user_tokens(self, user_id: uuid.UUID) -> None:

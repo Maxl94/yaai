@@ -5,6 +5,7 @@ login, token refresh, logout, user CRUD, service accounts, and model access.
 """
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -25,13 +26,14 @@ from yaai.server.auth.dependencies import (
 )
 from yaai.server.auth.jwt import create_access_token
 from yaai.server.auth.passwords import hash_password
+from yaai.server.config import settings
 from yaai.server.database import Base, get_db
 from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models import inference as _inference_models  # noqa: F401
 from yaai.server.models import job as _job_models  # noqa: F401
 from yaai.server.models import model as _model_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, RefreshToken, User, UserRole
-from yaai.server.services.auth_service import AuthService
+from yaai.server.services.auth_service import ROTATION_GRACE_SECONDS, AuthService
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -186,6 +188,14 @@ async def test_login_success(auth_client: AsyncClient, seeded_owner: User):
     assert data["user"]["role"] == "owner"
 
 
+async def test_login_cookie_is_secure_on_https_base_url(auth_client: AsyncClient, seeded_owner: User):
+    with patch.object(settings, "base_url", "https://yaai.example.com"):
+        resp = await auth_client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"}
+        )
+    assert "secure" in resp.headers["set-cookie"].lower()
+
+
 async def test_login_sets_httponly_refresh_cookie(auth_client: AsyncClient, seeded_owner: User):
     resp = await auth_client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-password-123"})
     cookie = resp.headers["set-cookie"].lower()
@@ -240,7 +250,23 @@ async def test_refresh_token_success(auth_client: AsyncClient, seeded_owner: Use
     rotated = auth_client.cookies.get("yaai_refresh")
     assert rotated and rotated != old
 
-    # Old refresh token is revoked by rotation — replaying it must fail
+    # A racing reload or second tab may still present the just-rotated token within the grace window
+    auth_client.cookies.clear()
+    assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(old))).status_code == 200
+
+
+async def test_rotated_refresh_token_rejected_after_grace_window(
+    auth_client: AsyncClient, seeded_owner: User, db_session: AsyncSession
+):
+    old = await _login_cookie(auth_client)
+    assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(old))).status_code == 200
+
+    row = (await db_session.execute(select(RefreshToken).order_by(RefreshToken.created_at))).scalars().first()
+    remaining = row.expires_at.replace(tzinfo=UTC) - datetime.now(UTC)
+    assert timedelta(0) < remaining <= timedelta(seconds=ROTATION_GRACE_SECONDS)
+
+    row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
     auth_client.cookies.clear()
     assert (await auth_client.post("/api/v1/auth/refresh", headers=_cookie(old))).status_code == 401
 
@@ -261,12 +287,13 @@ async def test_refresh_with_access_token_fails(auth_client: AsyncClient, seeded_
     token = create_access_token(AUTH_CONFIG, str(seeded_owner.id), "owner")
     resp = await auth_client.post("/api/v1/auth/refresh", headers=_cookie(token))
     assert resp.status_code == 401
-    assert 'yaai_refresh=""' in resp.headers["set-cookie"]
+    assert "set-cookie" not in resp.headers
 
 
 async def test_refresh_with_garbage_token_fails(auth_client: AsyncClient):
     resp = await auth_client.post("/api/v1/auth/refresh", headers=_cookie("not-a-jwt"))
     assert resp.status_code == 401
+    assert "set-cookie" not in resp.headers
 
 
 # Logout

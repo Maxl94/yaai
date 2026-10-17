@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import RedirectResponse
 
 from yaai.server.auth.config import AuthConfig
 from yaai.server.auth.dependencies import (
@@ -19,7 +19,7 @@ from yaai.server.auth.oauth import get_oauth
 from yaai.server.auth.passwords import verify_password
 from yaai.server.config import settings
 from yaai.server.database import get_db
-from yaai.server.models.auth import ModelAccess, ServiceAccount, UserRole
+from yaai.server.models.auth import ModelAccess, ServiceAccount, User, UserRole
 from yaai.server.models.model import Model
 from yaai.server.rate_limit import limiter
 from yaai.server.schemas.auth import (
@@ -66,7 +66,7 @@ def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH)
 
 
-async def _start_session(response: Response, svc: AuthService, user, config: AuthConfig) -> dict:
+async def _start_session(response: Response, svc: AuthService, user: User, config: AuthConfig) -> dict:
     """Issue a token pair: refresh token goes into the httpOnly cookie, access token and user into the body."""
     tokens = await svc.create_tokens(user)
     _set_refresh_cookie(response, tokens["refresh_token"], config)
@@ -112,12 +112,6 @@ async def login(request: Request, response: Response, data: LoginRequest, db: As
     return await _start_session(response, svc, user, config)
 
 
-def _reject_refresh(detail: str) -> JSONResponse:
-    response = JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": detail})
-    _clear_refresh_cookie(response)
-    return response
-
-
 @router.post("/refresh")
 # Called on every page load to restore the session, so the limit is higher than for login
 @limiter.limit("30/minute")
@@ -129,29 +123,28 @@ async def refresh_token(request: Request, response: Response, db: AsyncSession =
 
     token = request.cookies.get(REFRESH_COOKIE_NAME)
     if not token:
-        return _reject_refresh("Missing refresh token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
 
     try:
         payload = decode_token(config, token)
     except Exception:
-        return _reject_refresh("Invalid refresh token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")  # noqa: B904
 
     if payload.get("type") != "refresh":
-        return _reject_refresh("Invalid token type")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
 
     svc = _get_service(db, config)
 
     # Validate the refresh token exists in DB (not revoked)
     jti = payload.get("jti")
     if not jti or await svc.validate_refresh_token(jti) is None:
-        return _reject_refresh("Refresh token has been revoked")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token has been revoked")
 
     user = await svc.get_user_by_id(uuid.UUID(payload["sub"]))
     if user is None or not user.is_active:
-        return _reject_refresh("User not found or inactive")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
-    # Revoke old refresh token and issue new pair
-    await svc.revoke_refresh_token(jti)
+    await svc.rotate_refresh_token(jti)
     return await _start_session(response, svc, user, config)
 
 
