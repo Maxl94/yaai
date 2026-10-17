@@ -6,7 +6,15 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { HistogramData } from '@/types'
-import { DIRECTION_COLORS, bucketTooltipTitle, formatBucketLabels, type FieldDirection } from '@/utils/chartFormat'
+import {
+  DIRECTION_COLORS,
+  bucketTooltipTitle,
+  countAxis,
+  countBarStyle,
+  formatBucketLabels,
+  plotCount,
+  type FieldDirection,
+} from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -14,6 +22,7 @@ const props = defineProps<{
   data: HistogramData
   fieldName: string
   direction?: FieldDirection
+  logScale?: boolean
 }>()
 
 const option = computed(() => {
@@ -47,10 +56,7 @@ const option = computed(() => {
         width: 56,
       },
     },
-    yAxis: {
-      type: 'value',
-      name: 'Count',
-    },
+    yAxis: countAxis(props.logScale),
     series: [
       {
         name: 'Count',
@@ -58,13 +64,14 @@ const option = computed(() => {
         data: buckets.map((b) => {
           const isOutlier = b.is_underflow || b.is_overflow
           return {
-            value: b.count,
+            value: plotCount(b.count, props.logScale),
             itemStyle: isOutlier
               ? { color: OUTLIER_COLOR, borderColor: BAR_COLOR, borderType: 'dashed', borderWidth: 1 }
               : { color: BAR_COLOR },
           }
         }),
         barWidth: '90%',
+        ...countBarStyle(props.logScale),
       },
     ],
   }

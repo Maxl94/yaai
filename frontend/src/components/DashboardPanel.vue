@@ -7,6 +7,7 @@ import type { DashboardPanel, HistogramData, CategoricalData } from '@/types'
 
 const props = defineProps<{
   panel: DashboardPanel
+  logScale?: boolean
 }>()
 
 const fieldDirection = computed(() => (props.panel.direction === 'output' ? 'output' : 'input'))
@@ -85,6 +86,7 @@ function getDriftStatus(panel: DashboardPanel): { color: string; icon: string; l
             :data="panel.data"
             :field-name="panel.field_name"
             :direction="fieldDirection"
+            :log-scale="logScale"
           />
         </div>
         <div v-else class="empty-chart">
@@ -99,6 +101,7 @@ function getDriftStatus(panel: DashboardPanel): { color: string; icon: string; l
             :data="panel.data"
             :field-name="panel.field_name"
             :direction="fieldDirection"
+            :log-scale="logScale"
           />
         </div>
         <div v-else class="empty-chart">

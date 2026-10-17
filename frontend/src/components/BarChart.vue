@@ -10,8 +10,11 @@ import {
   DIRECTION_COLORS,
   aggregateTopCategories,
   categoryDisplayName,
+  countAxis,
+  countBarStyle,
   escapeHtml,
   isHorizontalLayout,
+  plotCount,
   type FieldDirection,
 } from '@/utils/chartFormat'
 
@@ -21,6 +24,7 @@ const props = defineProps<{
   data: CategoricalData
   fieldName: string
   direction?: FieldDirection
+  logScale?: boolean
 }>()
 
 const bars = computed(() => aggregateTopCategories(props.data.categories))
@@ -45,7 +49,7 @@ const option = computed(() => {
       width: isHorizontal ? 90 : 60,
     },
   }
-  const valueAxis = { type: 'value', name: 'Count' }
+  const valueAxis = countAxis(props.logScale)
 
   return {
     tooltip: {
@@ -70,10 +74,11 @@ const option = computed(() => {
         name: 'Count',
         type: 'bar',
         data: items.map((b) => ({
-          value: b.count,
+          value: plotCount(b.count, props.logScale),
           itemStyle: { color: b.otherCount ? muted : base },
         })),
         barMaxWidth: 28,
+        ...countBarStyle(props.logScale),
       },
     ],
   }

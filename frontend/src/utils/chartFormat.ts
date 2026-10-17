@@ -148,6 +148,21 @@ export function aggregateGroupedCategories(
   return bars
 }
 
+/** Count axis; on a log axis 0 cannot be drawn, so use `plotCount` for the series data. */
+export function countAxis(logScale?: boolean) {
+  return { type: logScale ? 'log' : 'value', name: 'Count' }
+}
+
+/** Series value for a count: zeros are left out on a log axis (log 0 is undefined). Tooltips keep the real count. */
+export function plotCount(count: number, logScale?: boolean): number | null {
+  return logScale && count === 0 ? null : count
+}
+
+/** On a log axis bars start at 1, so a count of 1 would have no height without a minimum. */
+export function countBarStyle(logScale?: boolean) {
+  return { barMinHeight: logScale ? 2 : 0 }
+}
+
 export type FieldDirection = 'input' | 'output'
 
 /** Inputs are teal, outputs (predictions) are orange - matching the direction chip's primary/secondary colors. */

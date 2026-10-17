@@ -24,6 +24,7 @@ const activeTab = ref<'all' | 'input' | 'output'>('all')
 const dateRange = ref<[string, string] | null>(null)
 
 // Date range picker
+const logScale = ref(false)
 const showDateMenu = ref(false)
 const dateFrom = ref('')
 const dateTo = ref('')
@@ -159,6 +160,8 @@ watch([dateRange], fetchData)
           </v-btn>
         </v-btn-toggle>
 
+        <v-switch v-model="logScale" label="Log scale" color="primary" density="compact" hide-details />
+
         <v-spacer />
 
         <v-menu v-model="showDateMenu" :close-on-content-click="false" location="bottom end">
@@ -215,7 +218,7 @@ watch([dateRange], fetchData)
         :style="{ animationDelay: `${index * 50}ms` }"
         class="panel-col"
       >
-        <DashboardPanel :panel="panel" class="panel-card" />
+        <DashboardPanel :panel="panel" :log-scale="logScale" class="panel-card" />
       </v-col>
     </v-row>
 

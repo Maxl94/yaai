@@ -141,7 +141,7 @@ This is useful for investigating shifts you've been alerted about or for ad-hoc 
 
 There's no dashboard builder. When you navigate to a model version in the UI, YAAI queries inference data for every schema field and renders:
 
-- **Histograms** for numerical fields, with mean, median, std, min, max. Histograms always use 20 equal-width bins, including empty ones, so the x-axis is linear. If a tail reaches far beyond the 1st/99th percentile, the bins stop at that percentile and the outliers are collected in a separate `<p1` / `>p99` bar (dashed in the chart), so a few extreme values don't squash the rest of the distribution. Non-finite values (NaN, Infinity) are ignored.
+- **Histograms** for numerical fields, with mean, median, std, min, max. Histograms always use 20 equal-width bins, including empty ones, so the x-axis is linear. If a tail reaches far beyond the 1st/99th percentile, the bins stop at that percentile and the outliers are collected in a separate `<p1` / `>p99` bar (dashed in the chart), so a few extreme values don't squash the rest of the distribution. Non-finite values (NaN, Infinity) are ignored. The "Log scale" switch on the dashboard and comparison pages turns the count axis logarithmic, so small bars stay visible next to a dominant one (empty bins are not drawn).
 - **Bar charts** for categorical fields, sorted by frequency
 - **Drift badges** showing the latest score per field
 

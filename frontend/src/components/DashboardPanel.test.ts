@@ -66,3 +66,47 @@ describe('DashboardPanel chart colors', () => {
     expect(new Set(barColors(makePanel('input', dataType)))).toEqual(new Set([TEAL]))
   })
 })
+
+describe('DashboardPanel log scale', () => {
+  type Axis = { type: string }
+  type Option = { xAxis: Axis; yAxis: Axis; series: { data: ({ value: number | null } | number)[] }[] }
+
+  function chartOption(panel: PanelData, logScale?: boolean): Option {
+    const wrapper = mount(DashboardPanel, {
+      props: { panel, logScale },
+      global: { plugins: [createTestVuetify()] },
+    })
+    return wrapper.findComponent({ name: 'VChartStub' }).props('option') as Option
+  }
+
+  it.each(['numerical', 'categorical'] as const)('uses a log count axis for %s charts', (dataType) => {
+    expect(chartOption(makePanel('input', dataType), true).yAxis.type).toBe('log')
+  })
+
+  it('keeps the linear count axis by default', () => {
+    expect(chartOption(makePanel('input', 'numerical')).yAxis.type).toBe('value')
+  })
+
+  it('leaves out empty buckets on the log axis', () => {
+    const panel = makePanel('input', 'numerical')
+    panel.data = {
+      ...numericalData,
+      buckets: [
+        { range_start: 0, range_end: 1, count: 0 },
+        { range_start: 1, range_end: 2, count: 7 },
+      ],
+    } as unknown as PanelData['data']
+    expect(chartOption(panel, true).series[0]!.data).toMatchObject([{ value: null }, { value: 7 }])
+  })
+
+  it('puts the log axis on x for horizontal bar charts', () => {
+    const panel = makePanel('input', 'categorical')
+    panel.data = {
+      ...categoricalData,
+      categories: [{ value: 'a very long category label', count: 3, percentage: 100 }],
+    } as unknown as PanelData['data']
+    const option = chartOption(panel, true)
+    expect(option.xAxis.type).toBe('log')
+    expect(option.yAxis.type).toBe('category')
+  })
+})
