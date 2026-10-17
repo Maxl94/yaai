@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import yaai.server.main as main_mod
+import yaai.server.startup as startup_mod
 from yaai.server.auth.config import AuthConfig
 from yaai.server.auth.dependencies import set_auth_config
 from yaai.server.auth.passwords import verify_password
@@ -113,11 +114,11 @@ class TestLifespanScheduler:
         session_cm.__aenter__ = AsyncMock(return_value=MagicMock())
         session_cm.__aexit__ = AsyncMock(return_value=False)
         with (
-            patch.object(main_mod, "check_schema_up_to_date"),
+            patch.object(startup_mod, "check_schema_up_to_date"),
             patch.object(main_mod.database, "async_session", MagicMock(return_value=session_cm)),
-            patch.object(main_mod, "load_active_jobs", new_callable=AsyncMock) as load_jobs,
-            patch.object(main_mod, "start_job_sync") as start_sync,
-            patch.object(main_mod, "scheduler") as scheduler,
+            patch.object(startup_mod, "load_active_jobs", new_callable=AsyncMock) as load_jobs,
+            patch.object(startup_mod, "start_job_sync") as start_sync,
+            patch.object(startup_mod, "scheduler") as scheduler,
         ):
             scheduler.running = False
             yield load_jobs, start_sync, scheduler

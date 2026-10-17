@@ -113,10 +113,11 @@ class TestGetMigrationStatus:
 class TestLifespanSchemaCheck:
     async def test_startup_aborts_when_schema_is_behind(self, caplog):
         import yaai.server.main as main_mod
+        import yaai.server.startup as startup_mod
 
         error = SchemaNotUpToDateError("Run `python -m yaai.server.migrate` before starting the server.")
         with (
-            patch.object(main_mod, "check_schema_up_to_date", side_effect=error),
+            patch.object(startup_mod, "check_schema_up_to_date", side_effect=error),
             caplog.at_level("ERROR"),
             pytest.raises(SchemaNotUpToDateError),
         ):

@@ -59,7 +59,7 @@
 
 ## Deployment
 
-In production (Docker), everything runs as a single process: FastAPI serves the REST API, the Vue frontend as static files, and APScheduler runs drift detection jobs -- all backed by one PostgreSQL database. No Redis, no Celery, no separate worker processes.
+In production (Docker), everything runs as a single process: FastAPI serves the REST API, the Vue frontend as static files, and APScheduler runs drift detection jobs -- all backed by one PostgreSQL database. No Redis, no Celery. To scale the API horizontally, set `SCHEDULER_ENABLED=false` on the API instances and run the scheduled jobs (and the notifications they create) in one headless worker process, `python -m yaai.server.worker`, built from the same image.
 
 ```bash
 docker compose up -d   # starts PostgreSQL, runs migrations, starts YAAI server

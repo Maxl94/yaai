@@ -1,4 +1,3 @@
-import asyncio
 import importlib.metadata
 import logging
 import os
@@ -12,25 +11,19 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
 
-from yaai.server import database
+from yaai.server import database, startup
 from yaai.server.admin_bootstrap import deliver_generated_password, resolve_admin_password
 from yaai.server.auth.config import load_auth_config, validate_auth_config
 from yaai.server.auth.dependencies import set_auth_config
 from yaai.server.auth.oauth import setup_oauth
 from yaai.server.auth.passwords import hash_password
 from yaai.server.config import api_docs_enabled, resolve_session_secret, settings
-from yaai.server.migrate import SchemaNotUpToDateError, check_schema_up_to_date
 from yaai.server.models import auth as _auth_models  # noqa: F401
 from yaai.server.models import project as _project_models  # noqa: F401
 from yaai.server.models.auth import AuthProvider, User, UserRole
 from yaai.server.rate_limit import limiter
 from yaai.server.routers import auth, dashboard, inferences, jobs, models, projects, schema
-from yaai.server.scheduler import (
-    load_active_jobs,
-    scheduler,
-    scheduler_enabled,
-    start_job_sync,
-)
+from yaai.server.scheduler import scheduler_enabled
 from yaai.server.security_headers import SecurityHeadersMiddleware, security_headers_enabled
 from yaai.server.spa import mount_spa
 
@@ -77,25 +70,7 @@ async def _bootstrap_admin() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    cloud_sql = None
-
-    # Migrations are never applied here; fail fast if the schema is behind
-    try:
-        await asyncio.to_thread(check_schema_up_to_date)
-    except SchemaNotUpToDateError as exc:
-        logger.error("%s", exc)
-        raise
-
-    # Initialize Cloud SQL async connector
-    if settings.cloud_sql_instance:
-        from yaai.server.cloud_sql import CloudSQLConnector  # noqa: PLC0415
-
-        cloud_sql = CloudSQLConnector()
-        await cloud_sql.startup()
-        database.init_engine(async_creator=cloud_sql.async_creator)
-        logger.info("Cloud SQL connector ready.")
-    else:
-        logger.info("Using DATABASE_URL (no Cloud SQL connector).")
+    cloud_sql = await startup.init_database()
 
     # Load auth configuration (skip if already pre-set, e.g. by tests)
     from yaai.server.auth.dependencies import _auth_config as _existing  # noqa: PLC0415
@@ -120,22 +95,14 @@ async def lifespan(app: FastAPI):
 
     # Start job scheduler (SCHEDULER_ENABLED=false for API-only instances)
     if scheduler_enabled():
-        logger.info("Loading active jobs ...")
-        async with database.async_session() as db:
-            await load_active_jobs(db)
-        start_job_sync()
-        scheduler.start()
+        await startup.start_scheduler()
     else:
         logger.info("SCHEDULER_ENABLED is false — scheduled jobs will not run on this instance.")
     logger.info("Startup complete.")
 
     yield
 
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
-
-    if cloud_sql:
-        await cloud_sql.shutdown()
+    await startup.shutdown(cloud_sql)
 
 
 _docs_enabled = api_docs_enabled()

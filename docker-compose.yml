@@ -2,7 +2,7 @@ x-yaai-app: &yaai-app
   image: yaai-dev:local
   env_file:
     - .env
-  environment:
+  environment: &yaai-env
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aimon}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-aimonitoring}
 
 services:
@@ -38,8 +38,24 @@ services:
   backend:
     <<: *yaai-app
     pull_policy: never
+    environment:
+      <<: *yaai-env
+      SCHEDULER_ENABLED: "false"
     ports:
       - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Runs the scheduled drift jobs (and creates their notifications); serves no HTTP.
+  worker:
+    <<: *yaai-app
+    pull_policy: never
+    command: [".venv/bin/python", "-m", "yaai.server.worker"]
+    healthcheck:
+      disable: true
     depends_on:
       db:
         condition: service_healthy

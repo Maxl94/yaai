@@ -97,9 +97,9 @@ includes a `sample_info` object:
 | `RATE_LIMIT_ENABLED` | `true` | Enable rate limiting. |
 | `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `0` | Trusted reverse proxies in front of the server; `1` on Cloud Run accessed directly, typically `2` behind an external HTTPS load balancer. Client IP is the N-th `X-Forwarded-For` entry from the right (an external HTTPS load balancer sends `X-Forwarded-For: <client>, <load-balancer-ip>`); client-supplied entries on the left are ignored. Check the header your deployment actually receives. If unset behind a proxy, all users share one rate-limit bucket. |
 | `RATE_LIMIT_STORAGE_URI` | `memory://` | Rate limit storage backend, e.g. `redis://host:6379` (the Redis client must be installed separately). |
-| `SCHEDULER_ENABLED` | `true` | Run the drift job scheduler in this instance. Use `false` for API-only instances/services. |
+| `SCHEDULER_ENABLED` | `true` | Run the drift job scheduler inside the API process. Set `false` on API instances when scheduled jobs run in the [worker](deployment.md#scheduled-jobs-worker) (`python -m yaai.server.worker`, which ignores this setting). |
 
-See [Deployment](deployment.md#running-multiple-instances) for running more than one instance (scheduler layouts, advisory lock, job reconciliation).
+See [Deployment](deployment.md#running-multiple-instances) for running more than one instance (worker, advisory lock, job reconciliation).
 
 ---
 

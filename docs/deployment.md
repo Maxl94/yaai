@@ -318,19 +318,33 @@ YAAI is designed as a single instance, but can run several (for example Cloud Ru
 | Rate limiting | Counters live in memory per instance, so the effective limit is multiplied by the instance count | Set `RATE_LIMIT_STORAGE_URI=redis://host:6379` (install the Redis client, e.g. `pip install redis`; it is not a YAAI dependency) |
 | Client IP | Behind a proxy every user may share its IP | Set `RATE_LIMIT_TRUSTED_PROXY_HOPS` (see [Configuration](configuration.md#security-and-multi-instance-operation)) |
 | OAuth code store and token caches | Kept in memory per instance | Use session affinity, or run a single instance |
-| Scheduled drift jobs | Every instance with `SCHEDULER_ENABLED=true` runs its own in-memory scheduler, so each cron job fires on every such instance | A PostgreSQL advisory lock makes an overlapping execution on another instance skip. Every scheduler re-reads the active jobs from the database every 60 seconds, so creating, rescheduling, pausing or deleting a job on any instance reaches all schedulers within that time |
+| Scheduled drift jobs | Every instance with `SCHEDULER_ENABLED=true` runs its own in-memory scheduler, so each cron job would fire on every such instance | Set `SCHEDULER_ENABLED=false` on all API instances and run the scheduled jobs in a single [worker](#scheduled-jobs-worker) |
 
-The advisory lock only prevents jobs from running **concurrently**; if one instance finishes before another instance's trigger fires, the job can still run twice. The lock is skipped on non-PostgreSQL databases. A job needs one database connection for its whole run (the lock is held on the connection that runs the job).
+### Scheduled jobs worker
 
-Job changes made through the API are applied immediately on the instance that served the request and on all other schedulers at the next reconciliation (at most 60 seconds later). Reconciliation only runs where `SCHEDULER_ENABLED=true`.
+The worker is a headless process (no HTTP server) that runs all scheduled drift jobs and therefore also creates the drift notifications. It uses the same image and configuration as the API; only the command differs:
 
-Two supported layouts:
+```bash
+python -m yaai.server.worker
+```
 
-- **Scheduler on every instance** (simplest): keep `SCHEDULER_ENABLED=true` everywhere. The advisory lock prevents overlapping runs and reconciliation keeps all schedules in sync.
-- **Dedicated scheduler service**: deploy the same image twice, the API service with `SCHEDULER_ENABLED=false` and a scheduler service with `SCHEDULER_ENABLED=true` and a single instance. On Cloud Run all instances of a service share the same environment variables, so "disabled on all but one instance" is only possible with two services.
+Run the API with `SCHEDULER_ENABLED=false` on any number of instances and exactly **one** worker. The worker always runs the scheduler and checks that the database schema is up to date on startup, so run the migration first. It stops cleanly on `SIGTERM`/`SIGINT`.
 
-> [!IMPORTANT]
-> **Cloud Run:** the scheduler runs inside the server process and needs CPU outside of requests. Use **"CPU always allocated"** (`--no-cpu-throttling`) and a minimum of one instance (`--min-instances=1`) for every service that runs the scheduler.
+Job changes made through the API reach the worker within 60 seconds (it re-reads the active jobs from the database on that interval). `POST /jobs/{id}/trigger` and the backfill endpoint still run inside the API request. A PostgreSQL advisory lock makes an overlapping execution of the same job skip; it does not prevent a job from running twice one after another, which is why there must be a single worker. The lock is skipped on non-PostgreSQL databases, and a job needs one database connection for its whole run.
+
+On **Cloud Run** use a [worker pool](https://cloud.google.com/run/docs/deploy-worker-pools) with one instance and the same service account and `CLOUD_SQL_*` settings as the API service:
+
+```bash
+gcloud run worker-pools deploy yaai-worker \
+  --image europe-west1-docker.pkg.dev/my-project/yaai/yaai:TAG \
+  --command python --args=-m,yaai.server.worker \
+  --service-account yaai-server@my-project.iam.gserviceaccount.com \
+  --set-env-vars CLOUD_SQL_INSTANCE=my-project:us-central1:yaai-db,CLOUD_SQL_USER=yaai-server@my-project.iam.gserviceaccount.com,CLOUD_SQL_DATABASE=aimonitoring \
+  --instances 1 \
+  --region us-central1
+```
+
+Worker pools have no URL and no CPU throttling, so no extra flags are needed. Deploy the worker after the migration job, together with the API. For `docker compose` see the `worker` service in `docker-compose.yml`.
 
 ## Troubleshooting
 
