@@ -157,7 +157,7 @@ Notes:
 
 ## Runnable example
 
-[`scripts/llm_monitoring_example.py`](https://github.com/Maxl94/yaai/blob/main/scripts/llm_monitoring_example.py) uses only the SDK and the standard library. It creates (or reuses) the model, creates the version with the schema above, uploads a baseline as reference data, sends a deliberately shifted period (longer prompts, a slower model, more errors), configures the drift job and triggers a run.
+[`scripts/llm_monitoring_example.py`](https://github.com/Maxl94/yaai/blob/main/scripts/llm_monitoring_example.py) uses only the SDK and the standard library. It creates (or reuses) the model, creates the version with the schema above, uploads a baseline as reference data, sends a deliberately shifted period (longer prompts, a slower model, more errors), configures the drift job and triggers a run. It imports a cost helper from `scripts/llm_reporter_example.py`, so keep that file next to it if you copy the script.
 
 ```bash
 export YAAI_API_KEY=yaam_...

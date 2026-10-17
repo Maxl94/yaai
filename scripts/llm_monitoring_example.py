@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """LLM metadata monitoring example (SDK only, no extra dependencies).
 
+Requires scripts/llm_reporter_example.py next to it (cost helper), so copy both files together.
+
 Demonstrates the recipe from docs/llm-monitoring.md: monitor an LLM application by sending per-call
 *metadata* (token counts, latency, cost, model name, error flag, ...) to YAAI and let the regular drift
 detection run on it.

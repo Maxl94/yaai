@@ -90,19 +90,8 @@ export function categoryDisplayName(label: string, otherCount?: number): string 
   return `Other (${otherCount} ${otherCount === 1 ? 'category' : 'categories'})`
 }
 
-/** Keep the first `topN` (already sorted) bars and sum the rest into one "Other" bar. */
-function withOther<T extends { label: string; otherCount?: number }>(
-  sorted: T[],
-  topN: number,
-  sumRest: (rest: T[]) => Omit<T, 'label' | 'otherCount'>
-): T[] {
-  const bars = sorted.slice(0, topN)
-  const rest = sorted.slice(topN)
-  if (rest.length > 0) {
-    bars.push({ ...sumRest(rest), label: `Other (${rest.length})`, otherCount: rest.length } as T)
-  }
-  return bars
-}
+/** Fields of the summed "Other" bar that replaces all categories beyond the top N. */
+const otherLabel = (rest: unknown[]) => ({ label: `Other (${rest.length})`, otherCount: rest.length })
 
 const sumBy = <T>(items: T[], key: (item: T) => number) => items.reduce((sum, item) => sum + key(item), 0)
 
@@ -111,10 +100,16 @@ export function aggregateTopCategories(categories: CategoryCount[], topN = TOP_C
   const sorted = categories
     .map((c) => ({ label: c.value, count: c.count, percentage: c.percentage }))
     .sort((a, b) => b.count - a.count)
-  return withOther<CategoryBar>(sorted, topN, (rest) => ({
-    count: sumBy(rest, (c) => c.count),
-    percentage: sumBy(rest, (c) => c.percentage),
-  }))
+  const bars = sorted.slice(0, topN)
+  const rest = sorted.slice(topN)
+  if (rest.length > 0) {
+    bars.push({
+      ...otherLabel(rest),
+      count: sumBy(rest, (c) => c.count),
+      percentage: sumBy(rest, (c) => c.percentage),
+    })
+  }
+  return bars
 }
 
 interface GroupedCategoryBar {
@@ -141,8 +136,14 @@ export function aggregateGroupedCategories(
   const sorted = [...merged.entries()]
     .map(([label, counts]) => ({ label, ...counts }))
     .sort((x, y) => y.countA + y.countB - (x.countA + x.countB))
-  return withOther<GroupedCategoryBar>(sorted, topN, (rest) => ({
-    countA: sumBy(rest, (c) => c.countA),
-    countB: sumBy(rest, (c) => c.countB),
-  }))
+  const bars = sorted.slice(0, topN)
+  const rest = sorted.slice(topN)
+  if (rest.length > 0) {
+    bars.push({
+      ...otherLabel(rest),
+      countA: sumBy(rest, (c) => c.countA),
+      countB: sumBy(rest, (c) => c.countB),
+    })
+  }
+  return bars
 }

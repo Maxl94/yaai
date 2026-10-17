@@ -41,13 +41,13 @@ function makeJob(overrides: Partial<JobConfig>): JobConfig {
 
 let wrapper: VueWrapper | null = null
 
-async function mountPage(globalRole: 'owner' | 'viewer') {
+async function mountPage(globalRole: 'owner' | 'viewer', { preloadProjects = true } = {}) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const auth = useAuthStore()
   auth.authConfig = { enabled: true, local_enabled: true, google_oauth_enabled: false, allow_registration: false }
   auth.user = makeUser({ role: globalRole })
-  await useProjectsStore().ensureLoaded()
+  if (preloadProjects) await useProjectsStore().ensureLoaded()
   wrapper = mount(JobsPage, { global: { plugins: [pinia, createTestVuetify()] }, attachTo: document.body })
   await flushPromises()
 }
@@ -81,6 +81,17 @@ describe('JobsPage per-job write gating on the global page', () => {
     expect(hasAction('job-b', 'mdi-play')).toBe(false)
     expect(hasAction('job-b', 'mdi-pencil')).toBe(false)
     expect(hasAction('job-b', 'mdi-history')).toBe(true)
+    expect(hasAction('job-other', 'mdi-play')).toBe(false)
+    expect(hasAction('job-other', 'mdi-pencil')).toBe(false)
+  })
+
+  it('shows actions once the projects store finishes loading after mount', async () => {
+    await mountPage('viewer', { preloadProjects: false })
+    expect(hasAction('job-a', 'mdi-pencil')).toBe(false)
+    await useProjectsStore().ensureLoaded()
+    await flushPromises()
+    expect(hasAction('job-a', 'mdi-pencil')).toBe(true)
+    expect(hasAction('job-b', 'mdi-pencil')).toBe(false)
   })
 
   it('shows every action to a global owner', async () => {
