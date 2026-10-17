@@ -12,6 +12,11 @@ import yaai.server.worker as worker_mod
 from yaai.server.migrate import SchemaNotUpToDateError
 
 
+async def _until(condition) -> None:
+    while not condition():
+        await asyncio.sleep(0)
+
+
 @pytest.fixture
 def parts():
     """Patch the startup collaborators and record the call order."""
@@ -39,7 +44,7 @@ class TestRun:
         stop = asyncio.Event()
 
         task = asyncio.create_task(worker_mod.run(stop))
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(_until(lambda: scheduler.running), timeout=5)
 
         assert calls == ["schema", "load", "sync", "scheduler.start"]
         assert not task.done()

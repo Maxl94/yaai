@@ -272,7 +272,11 @@ In your CD pipeline, update and run the job **before** deploying the new service
     gcloud run jobs execute yaai-migrate --region us-central1 --wait
 - name: Deploy service
   run: gcloud run deploy yaai --image "$IMAGE" --region us-central1
+- name: Deploy worker
+  run: gcloud run worker-pools deploy yaai-worker --image "$IMAGE" --region us-central1
 ```
+
+The last step is only needed if you run a [scheduled jobs worker](#scheduled-jobs-worker). It keeps the worker on the same image as the migrated schema and the API.
 
 #### Rollbacks and backward-compatible migrations
 
@@ -345,6 +349,9 @@ gcloud run worker-pools deploy yaai-worker \
 ```
 
 Worker pools have no URL and no CPU throttling, so no extra flags are needed. Deploy the worker after the migration job, together with the API. For `docker compose` see the `worker` service in `docker-compose.yml`.
+
+> [!IMPORTANT]
+> **Cloud Run, single service:** if the API service itself runs the scheduler (`SCHEDULER_ENABLED=true`, the default), it needs CPU outside of requests. Deploy it with **"CPU always allocated"** (`--no-cpu-throttling`) and `--min-instances=1`, otherwise cron jobs are silently missed. To scale the API beyond one instance, move the scheduler to the worker pool above instead.
 
 ## Troubleshooting
 
