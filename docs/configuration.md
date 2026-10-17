@@ -88,19 +88,18 @@ includes a `sample_info` object:
 | Variable | Default | Description |
 |---|---|---|
 | `ENVIRONMENT` | `development` | `production` / `prod` enforces secrets and disables the API docs by default. |
-| `AUTH_JWT_SECRET` | *(none)* | JWT signing secret. **Required in production** (ephemeral secret in development). |
+| `AUTH_JWT_SECRET` | *(none)* | JWT signing secret. **Required in production** -- the server refuses to start without it (ephemeral secret in development, sessions then do not survive restarts). Generate with `openssl rand -base64 32`. |
 | `SESSION_SECRET` | *(none)* | Session/OAuth state secret. **Required in production** (ephemeral secret in development). |
-| `BOOTSTRAP_ADMIN_PASSWORD` | *(generated)* | Initial `admin` password, min. 12 characters. |
-| `BOOTSTRAP_ADMIN_PASSWORD_FILE` | `./admin-initial-password.txt` | New file (mode `0600`, never overwritten) receiving the generated initial admin password. The password is never logged; if the file cannot be created it is printed once to stderr. |
+| `BOOTSTRAP_ADMIN_PASSWORD` | *(generated)* | Initial `admin` password (min. 12 characters, otherwise the server refuses to start). Recommended for the first start and **effectively required on Cloud Run**, where you cannot read files inside an instance. If unset, a password is generated and written to `BOOTSTRAP_ADMIN_PASSWORD_FILE`. |
+| `BOOTSTRAP_ADMIN_PASSWORD_FILE` | `./admin-initial-password.txt` | New file (mode `0600`, never overwritten) receiving the generated initial admin password, relative to the server's working directory. The password is never logged, only the file path. If the file cannot be created (not writable, or it already exists), the password is printed once to stderr -- in containers usually the log stream, so set `BOOTSTRAP_ADMIN_PASSWORD` or a writable path instead. The admin account is only created after the password has been delivered. |
 | `API_DOCS_ENABLED` | `true` / `false` in production | Expose `/docs`, `/redoc` and `/openapi.json`. |
 | `SECURITY_HEADERS_ENABLED` | `true` | Add CSP, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and HSTS (over HTTPS). |
 | `RATE_LIMIT_ENABLED` | `true` | Enable rate limiting. |
-| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `0` | Trusted reverse proxies in front of the server; `1` on Cloud Run accessed directly, typically `2` behind an external HTTPS load balancer. Client IP is the N-th `X-Forwarded-For` entry from the right. |
+| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `0` | Trusted reverse proxies in front of the server; `1` on Cloud Run accessed directly, typically `2` behind an external HTTPS load balancer. Client IP is the N-th `X-Forwarded-For` entry from the right (an external HTTPS load balancer sends `X-Forwarded-For: <client>, <load-balancer-ip>`); client-supplied entries on the left are ignored. Check the header your deployment actually receives. If unset behind a proxy, all users share one rate-limit bucket. |
 | `RATE_LIMIT_STORAGE_URI` | `memory://` | Rate limit storage backend, e.g. `redis://host:6379` (the Redis client must be installed separately). |
 | `SCHEDULER_ENABLED` | `true` | Run the drift job scheduler in this instance. Use `false` for API-only instances/services. |
-| `SCHEDULER_SYNC_INTERVAL_SECONDS` | `60` | How often the scheduler reloads active jobs from the database, so job changes made on other instances take effect. |
 
-See [Deployment](deployment.md#running-multiple-instances) for running more than one instance.
+See [Deployment](deployment.md#running-multiple-instances) for running more than one instance (scheduler layouts, advisory lock, job reconciliation).
 
 ---
 
