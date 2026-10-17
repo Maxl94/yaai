@@ -3421,7 +3421,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess" },
+    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -4918,6 +4918,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/62/dbf11a262f6fbb41390cab2d8e47a30ec0961018b68201607b599dd489f5/sqlalchemy-2.1.4-py3-none-any.whl", hash = "sha256:0b96edcc2cd60fe1e35f67a46f4eb076e57297841b9eae949ac5f196593f00a7", size = 2054935, upload-time = "2026-10-07T18:01:16.403Z" },
 ]
 
+[package.optional-dependencies]
+asyncio = [
+    { name = "greenlet" },
+]
+
 [[package]]
 name = "stack-data"
 version = "0.6.3"
@@ -5387,14 +5392,13 @@ server = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "slowapi" },
-    { name = "sqlalchemy" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "aiosqlite" },
-    { name = "greenlet" },
     { name = "ipython" },
     { name = "jupyter" },
     { name = "matplotlib" },
@@ -5437,7 +5441,7 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'server'", specifier = ">=1.6.0" },
     { name = "scipy", marker = "extra == 'server'", specifier = ">=1.17.0" },
     { name = "slowapi", marker = "extra == 'server'", specifier = ">=0.1.9" },
-    { name = "sqlalchemy", marker = "extra == 'server'", specifier = ">=2.0.46" },
+    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'server'", specifier = ">=2.0.46" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.40.0" },
 ]
 provides-extras = ["gcp", "server"]
@@ -5445,7 +5449,6 @@ provides-extras = ["gcp", "server"]
 [package.metadata.requires-dev]
 dev = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
-    { name = "greenlet", specifier = ">=3.3.1" },
     { name = "ipython", specifier = ">=9.10.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
