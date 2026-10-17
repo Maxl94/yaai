@@ -1,4 +1,4 @@
-import client from './client'
+import client, { requestRefresh } from './client'
 import type {
   AuthConfigResponse,
   TokenResponse,
@@ -19,11 +19,13 @@ async function login(credentials: LoginRequest): Promise<TokenResponse> {
   return response.data.data
 }
 
-async function refresh(refreshToken: string): Promise<TokenResponse> {
-  const response = await client.post<{ data: TokenResponse }>('/auth/refresh', {
-    refresh_token: refreshToken,
-  })
+async function refresh(): Promise<TokenResponse> {
+  const response = await requestRefresh()
   return response.data.data
+}
+
+async function logout(): Promise<void> {
+  await client.post('/auth/logout')
 }
 
 async function getMe(): Promise<AuthUser> {
@@ -36,13 +38,6 @@ async function changePassword(currentPassword: string, newPassword: string): Pro
     current_password: currentPassword,
     new_password: newPassword,
   })
-}
-
-async function exchangeAuthCode(code: string): Promise<{ access_token: string; refresh_token: string }> {
-  const response = await client.post<{
-    data: { access_token: string; refresh_token: string; token_type: string }
-  }>('/auth/oauth/exchange', { code })
-  return response.data.data
 }
 
 // Owner: Users
@@ -121,9 +116,9 @@ export const authApi = {
   getConfig,
   login,
   refresh,
+  logout,
   getMe,
   changePassword,
-  exchangeAuthCode,
   listUsers,
   createUser,
   updateUser,

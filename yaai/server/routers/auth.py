@@ -1,13 +1,11 @@
 """Authentication and user management API endpoints."""
 
-import secrets as _secrets
 import uuid
 
-from cachetools import TTLCache
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.responses import RedirectResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from yaai.server.auth.config import AuthConfig
 from yaai.server.auth.dependencies import (
@@ -27,11 +25,9 @@ from yaai.server.rate_limit import limiter
 from yaai.server.schemas.auth import (
     AuthConfigResponse,
     LoginRequest,
-    LogoutRequest,
     ModelAccessCreate,
     ModelAccessRead,
     PasswordChange,
-    RefreshRequest,
     ServiceAccountCreate,
     ServiceAccountCreateResponse,
     ServiceAccountKeyInfo,
@@ -45,12 +41,40 @@ from yaai.server.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# Short-lived auth code -> tokens mapping (60 second TTL, max 1000 pending)
-_oauth_code_store: TTLCache = TTLCache(maxsize=1000, ttl=60)
+REFRESH_COOKIE_NAME = "yaai_refresh"
+# Only the refresh/logout endpoints need the cookie; both are POST-only, so SameSite=Lax never sends it cross-site
+REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 
 def _get_service(db: AsyncSession, config: AuthConfig) -> AuthService:
     return AuthService(db, config)
+
+
+def _set_refresh_cookie(response: Response, token: str, config: AuthConfig) -> None:
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        token,
+        max_age=config.jwt.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        path=REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=settings.base_url.startswith("https://"),
+        samesite="lax",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH)
+
+
+async def _start_session(response: Response, svc: AuthService, user, config: AuthConfig) -> dict:
+    """Issue a token pair: refresh token goes into the httpOnly cookie, access token and user into the body."""
+    tokens = await svc.create_tokens(user)
+    _set_refresh_cookie(response, tokens["refresh_token"], config)
+    return {
+        "data": TokenResponse(
+            access_token=tokens["access_token"], token_type=tokens["token_type"], user=UserRead.model_validate(user)
+        )
+    }
 
 
 # Public endpoints
@@ -72,8 +96,8 @@ async def get_config():
 
 @router.post("/login")
 @limiter.limit("20/minute")
-async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """Authenticate with username and password, returns JWT tokens."""
+async def login(request: Request, response: Response, data: LoginRequest, db: AsyncSession = Depends(get_db)):
+    """Authenticate with username and password: returns the access token, sets the refresh cookie."""
     config = get_auth_config()
     if not config.enabled:
         raise HTTPException(status_code=400, detail="Authentication is not enabled")
@@ -85,41 +109,50 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
 
-    tokens = await svc.create_tokens(user)
-    return {"data": TokenResponse(**tokens, user=UserRead.model_validate(user))}
+    return await _start_session(response, svc, user, config)
+
+
+def _reject_refresh(detail: str) -> JSONResponse:
+    response = JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": detail})
+    _clear_refresh_cookie(response)
+    return response
 
 
 @router.post("/refresh")
-@limiter.limit("10/minute")
-async def refresh_token(request: Request, data: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    """Exchange a refresh token for a new access/refresh token pair."""
+# Called on every page load to restore the session, so the limit is higher than for login
+@limiter.limit("30/minute")
+async def refresh_token(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    """Rotate the refresh cookie and return a new access token."""
     config = get_auth_config()
     if not config.enabled:
         raise HTTPException(status_code=400, detail="Authentication is not enabled")
 
+    token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not token:
+        return _reject_refresh("Missing refresh token")
+
     try:
-        payload = decode_token(config, data.refresh_token)
+        payload = decode_token(config, token)
     except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")  # noqa: B904
+        return _reject_refresh("Invalid refresh token")
 
     if payload.get("type") != "refresh":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+        return _reject_refresh("Invalid token type")
 
     svc = _get_service(db, config)
 
     # Validate the refresh token exists in DB (not revoked)
     jti = payload.get("jti")
     if not jti or await svc.validate_refresh_token(jti) is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token has been revoked")
+        return _reject_refresh("Refresh token has been revoked")
 
     user = await svc.get_user_by_id(uuid.UUID(payload["sub"]))
     if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+        return _reject_refresh("User not found or inactive")
 
     # Revoke old refresh token and issue new pair
     await svc.revoke_refresh_token(jti)
-    tokens = await svc.create_tokens(user)
-    return {"data": TokenResponse(**tokens, user=UserRead.model_validate(user))}
+    return await _start_session(response, svc, user, config)
 
 
 # Google OAuth
@@ -142,7 +175,7 @@ async def google_login(request: Request):
 
 @router.get("/oauth/google/callback", name="google_callback")
 async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
-    """Handle Google OAuth2 callback, create/find user, return JWT tokens."""
+    """Handle Google OAuth2 callback, create/find user, set the refresh cookie and redirect to the SPA."""
     config = get_auth_config()
     if not config.oauth.google.enabled:
         raise HTTPException(status_code=400, detail="Google OAuth is not enabled")
@@ -170,46 +203,22 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Access denied")
 
     tokens = await svc.create_tokens(user)
-
-    # Generate a short-lived auth code instead of passing tokens in the URL
-    code = _secrets.token_urlsafe(32)
-    _oauth_code_store[code] = tokens
-    frontend_url = f"{settings.base_url}/?auth_code={code}"
-    return RedirectResponse(url=frontend_url)
-
-
-@router.post("/oauth/exchange")
-@limiter.limit("10/minute")
-async def exchange_auth_code(request: Request):
-    """Exchange a short-lived auth code for JWT tokens (one-time use)."""
-    body = await request.json()
-    code = body.get("code", "")
-
-    token_data = _oauth_code_store.pop(code, None)
-    if token_data is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired auth code",
-        )
-
-    return {
-        "data": {
-            "access_token": token_data["access_token"],
-            "refresh_token": token_data["refresh_token"],
-            "token_type": "bearer",
-        }
-    }
+    response = RedirectResponse(url=f"{settings.base_url}/")
+    _set_refresh_cookie(response, tokens["refresh_token"], config)
+    return response
 
 
 @router.post("/logout")
-async def logout(data: LogoutRequest, db: AsyncSession = Depends(get_db)):
-    """Revoke a refresh token (log out)."""
+async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    """Revoke the refresh token from the cookie and clear it (log out)."""
+    _clear_refresh_cookie(response)
     config = get_auth_config()
-    if not config.enabled:
+    token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not config.enabled or not token:
         return {"data": {"message": "Logged out"}}
 
     try:
-        payload = decode_token(config, data.refresh_token)
+        payload = decode_token(config, token)
     except Exception:
         # Token is invalid/expired — already effectively logged out
         return {"data": {"message": "Logged out"}}
@@ -259,6 +268,7 @@ async def get_me(
 @router.put("/me/password")
 async def change_my_password(
     data: PasswordChange,
+    response: Response,
     identity: CurrentIdentity = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -281,6 +291,7 @@ async def change_my_password(
 
     # Also revokes all refresh tokens: every session must re-authenticate once its access token expires
     await svc.change_password(user, data.new_password)
+    _clear_refresh_cookie(response)
     return {"data": {"message": "Password changed successfully. Please log in again."}}
 
 

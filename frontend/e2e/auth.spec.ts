@@ -48,7 +48,7 @@ test.describe('Authentication - Local Auth', () => {
     await expect(page.locator('h1')).toContainText('Models', { timeout: 10000 })
   })
 
-  test('stores tokens in localStorage after login', async ({ page }) => {
+  test('keeps the refresh token in an httpOnly cookie and nothing in localStorage', async ({ page }) => {
     await page.goto('/login', { waitUntil: 'networkidle' })
     await expect(page.getByLabel('Username')).toBeVisible({ timeout: 10000 })
 
@@ -58,10 +58,14 @@ test.describe('Authentication - Local Auth', () => {
 
     await page.waitForURL('**/models', { timeout: 15000 })
 
-    const accessToken = await page.evaluate(() => localStorage.getItem('access_token'))
-    const refreshToken = await page.evaluate(() => localStorage.getItem('refresh_token'))
-    expect(accessToken).toBeTruthy()
-    expect(refreshToken).toBeTruthy()
+    expect(await page.evaluate(() => localStorage.getItem('access_token'))).toBeNull()
+    expect(await page.evaluate(() => localStorage.getItem('refresh_token'))).toBeNull()
+    expect(await page.evaluate(() => document.cookie)).not.toContain('yaai_refresh')
+
+    const cookies = await page.context().cookies()
+    const refresh = cookies.find((c) => c.name === 'yaai_refresh')
+    expect(refresh?.httpOnly).toBe(true)
+    expect(refresh?.path).toBe('/api/v1/auth')
   })
 
   test('session persists across page reload', async ({ page }) => {
@@ -101,8 +105,12 @@ test.describe('Authentication - Local Auth', () => {
     await page.getByText('Sign Out').click()
     await page.waitForURL('**/login', { timeout: 15000 })
 
-    const accessToken = await page.evaluate(() => localStorage.getItem('access_token'))
-    expect(accessToken).toBeNull()
+    const cookies = await page.context().cookies()
+    expect(cookies.find((c) => c.name === 'yaai_refresh')).toBeUndefined()
+
+    // Without the cookie a reload must not restore the session
+    await page.goto('/models', { waitUntil: 'commit' })
+    await page.waitForURL('**/login', { timeout: 15000 })
   })
 
   test('all protected routes redirect to login when unauthenticated', async ({ page }) => {

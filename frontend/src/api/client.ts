@@ -1,5 +1,5 @@
 import axios, { type AxiosError } from 'axios'
-import type { ApiError } from '@/types'
+import type { ApiError, TokenResponse } from '@/types'
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -8,11 +8,23 @@ const client = axios.create({
   },
 })
 
-// Request interceptor: attach Bearer token from localStorage
+// The access token lives in memory only; the refresh token is an httpOnly cookie that JS cannot read
+let accessToken: string | null = null
+
+export function setAccessToken(token: string | null) {
+  accessToken = token
+}
+
+// Rotation invalidates the old refresh cookie, so concurrent refreshes (e.g. two tabs) must run one after another
+export function requestRefresh() {
+  const call = () => client.post<{ data: TokenResponse }>('/auth/refresh')
+  return navigator.locks ? navigator.locks.request('yaai-auth-refresh', call) : call()
+}
+
+// Request interceptor: attach access token from memory
 client.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token && config.url && !config.url.startsWith('/auth/config') && !config.url.startsWith('/auth/login')) {
-    config.headers.Authorization = `Bearer ${token}`
+  if (accessToken && config.url && !config.url.startsWith('/auth/config') && !config.url.startsWith('/auth/login')) {
+    config.headers.Authorization = `Bearer ${accessToken}`
   }
   return config
 })
@@ -64,35 +76,24 @@ client.interceptors.response.use(
       ;(originalRequest as unknown as Record<string, unknown>)._retry = true
       isRefreshing = true
 
-      const refreshToken = localStorage.getItem('refresh_token')
-      if (refreshToken) {
-        try {
-          const response = await client.post<{
-            data: { access_token: string; refresh_token: string }
-          }>('/auth/refresh', { refresh_token: refreshToken })
+      try {
+        const response = await requestRefresh()
+        const { access_token } = response.data.data
+        setAccessToken(access_token)
 
-          const { access_token, refresh_token: new_refresh } = response.data.data
-          localStorage.setItem('access_token', access_token)
-          localStorage.setItem('refresh_token', new_refresh)
-
-          if (originalRequest.headers) {
-            originalRequest.headers.Authorization = `Bearer ${access_token}`
-          }
-
-          processQueue(null, access_token)
-          return client(originalRequest)
-        } catch (refreshError) {
-          processQueue(refreshError, null)
-          // Refresh failed: clear tokens (router guard will redirect to login)
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          return Promise.reject(refreshError)
-        } finally {
-          isRefreshing = false
+        if (originalRequest.headers) {
+          originalRequest.headers.Authorization = `Bearer ${access_token}`
         }
-      } else {
-        // No refresh token: clear tokens (router guard will redirect to login)
-        localStorage.removeItem('access_token')
+
+        processQueue(null, access_token)
+        return client(originalRequest)
+      } catch (refreshError) {
+        processQueue(refreshError, null)
+        // Refresh failed: drop the token (router guard will redirect to login)
+        setAccessToken(null)
+        return Promise.reject(refreshError)
+      } finally {
+        isRefreshing = false
       }
     }
 
