@@ -6,7 +6,15 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { CategoricalData } from '@/types'
-import { aggregateGroupedCategories, categoryDisplayName, escapeHtml, isHorizontalLayout } from '@/utils/chartFormat'
+import {
+  aggregateGroupedCategories,
+  categoryDisplayName,
+  countAxis,
+  countBarStyle,
+  escapeHtml,
+  isHorizontalLayout,
+  plotCount,
+} from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -16,6 +24,7 @@ const props = defineProps<{
   fieldName: string
   labelA?: string
   labelB?: string
+  logScale?: boolean
 }>()
 
 const bars = computed(() => aggregateGroupedCategories(props.dataA.categories, props.dataB.categories))
@@ -24,7 +33,7 @@ const horizontal = computed(() => isHorizontalLayout(bars.value.map((b) => b.lab
 // Horizontal layout needs ~30px per category (two bars); vertical keeps the compact default.
 const chartHeight = computed(() => (horizontal.value ? Math.max(220, 60 + bars.value.length * 30) : 220))
 
-type TooltipItem = { seriesName: string; value: number; marker: string; dataIndex: number }
+type TooltipItem = { seriesName: string; value: number | null; marker: string; dataIndex: number }
 
 const option = computed(() => {
   const items = bars.value
@@ -43,7 +52,7 @@ const option = computed(() => {
       width: isHorizontal ? 90 : 60,
     },
   }
-  const valueAxis = { type: 'value', name: 'Count' }
+  const valueAxis = countAxis(props.logScale)
 
   return {
     tooltip: {
@@ -52,7 +61,7 @@ const option = computed(() => {
       formatter: (params: TooltipItem[]) => {
         const bar = items[params[0]?.dataIndex ?? 0]
         if (!bar) return ''
-        const rows = params.map((p) => `${p.marker} ${escapeHtml(p.seriesName)}: ${p.value}`)
+        const rows = params.map((p) => `${p.marker} ${escapeHtml(p.seriesName)}: ${p.value ?? 0}`)
         return [escapeHtml(categoryDisplayName(bar.label, bar.otherCount)), ...rows].join('<br/>')
       },
     },
@@ -73,16 +82,18 @@ const option = computed(() => {
       {
         name: nameA,
         type: 'bar',
-        data: items.map((b) => b.countA),
+        data: items.map((b) => plotCount(b.countA, props.logScale)),
         itemStyle: { color: 'rgba(13, 148, 136, 0.7)' },
         barMaxWidth: 20,
+        ...countBarStyle(props.logScale),
       },
       {
         name: nameB,
         type: 'bar',
-        data: items.map((b) => b.countB),
+        data: items.map((b) => plotCount(b.countB, props.logScale)),
         itemStyle: { color: 'rgba(245, 158, 11, 0.45)' },
         barMaxWidth: 20,
+        ...countBarStyle(props.logScale),
       },
     ],
   }

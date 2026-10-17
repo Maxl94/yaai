@@ -5,11 +5,14 @@ import {
   aggregateTopCategories,
   bucketTooltipTitle,
   categoryDisplayName,
+  countAxis,
+  countBarStyle,
   escapeHtml,
   formatBucketLabel,
   formatBucketLabels,
   formatCompactNumber,
   isHorizontalLayout,
+  plotCount,
 } from './chartFormat'
 
 const bucket = (overrides: Partial<HistogramBucket> = {}): HistogramBucket => ({
@@ -244,5 +247,23 @@ describe('aggregateGroupedCategories', () => {
       countB: 5,
       otherCount: 3,
     })
+  })
+})
+
+describe('count axis helpers', () => {
+  it('switches the axis type and keeps the name', () => {
+    expect(countAxis()).toEqual({ type: 'value', name: 'Count' })
+    expect(countAxis(true)).toEqual({ type: 'log', name: 'Count', min: 1 })
+  })
+
+  it('drops zero counts only on the log axis', () => {
+    expect(plotCount(0, true)).toBeNull()
+    expect(plotCount(0)).toBe(0)
+    expect(plotCount(4, true)).toBe(4)
+  })
+
+  it('gives bars a minimum height only on the log axis', () => {
+    expect(countBarStyle(true).barMinHeight).toBeGreaterThan(0)
+    expect(countBarStyle().barMinHeight).toBe(0)
   })
 })

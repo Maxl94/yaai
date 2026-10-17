@@ -6,7 +6,14 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { HistogramData } from '@/types'
-import { bucketTooltipTitle, escapeHtml, formatBucketLabels } from '@/utils/chartFormat'
+import {
+  bucketTooltipTitle,
+  countAxis,
+  countBarStyle,
+  escapeHtml,
+  formatBucketLabels,
+  plotCount,
+} from '@/utils/chartFormat'
 
 use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -16,12 +23,13 @@ const props = defineProps<{
   fieldName: string
   labelA?: string
   labelB?: string
+  logScale?: boolean
 }>()
 
 const COLOR_A = 'rgba(13, 148, 136, 0.7)'
 const COLOR_B = 'rgba(245, 158, 11, 0.45)'
 
-type TooltipItem = { dataIndex: number; seriesName: string; value: number; marker: string }
+type TooltipItem = { dataIndex: number; seriesName: string; value: number | null; marker: string }
 
 const option = computed(() => {
   const bucketsA = props.dataA.buckets
@@ -34,7 +42,7 @@ const option = computed(() => {
 
   const seriesData = (buckets: typeof bucketsA, color: string) =>
     buckets.map((b) => ({
-      value: b.count,
+      value: plotCount(b.count, props.logScale),
       itemStyle:
         b.is_underflow || b.is_overflow
           ? { color, opacity: 0.5, borderColor: color, borderType: 'dashed', borderWidth: 1 }
@@ -48,7 +56,7 @@ const option = computed(() => {
       formatter: (params: TooltipItem[]) => {
         const bucket = reference[params[0]?.dataIndex ?? 0]
         if (!bucket) return ''
-        const rows = params.map((p) => `${p.marker} ${escapeHtml(p.seriesName)}: ${p.value}`)
+        const rows = params.map((p) => `${p.marker} ${escapeHtml(p.seriesName)}: ${p.value ?? 0}`)
         return [bucketTooltipTitle(bucket), ...rows].join('<br/>')
       },
     },
@@ -74,22 +82,21 @@ const option = computed(() => {
         width: 56,
       },
     },
-    yAxis: {
-      type: 'value',
-      name: 'Count',
-    },
+    yAxis: countAxis(props.logScale),
     series: [
       {
         name: nameA,
         type: 'bar',
         data: seriesData(bucketsA, COLOR_A),
         barWidth: '35%',
+        ...countBarStyle(props.logScale),
       },
       {
         name: nameB,
         type: 'bar',
         data: seriesData(bucketsB, COLOR_B),
         barWidth: '35%',
+        ...countBarStyle(props.logScale),
       },
     ],
   }
