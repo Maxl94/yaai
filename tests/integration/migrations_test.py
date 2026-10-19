@@ -4,7 +4,6 @@ import logging
 import uuid
 
 import pytest
-from alembic import command
 from sqlalchemy import create_engine, text
 
 from yaai.server import migrate
@@ -21,8 +20,6 @@ def isolated_db(pg_container, pg_sync_engine, monkeypatch):
     host = pg_container.get_container_host_ip()
     port = pg_container.get_exposed_port(5432)
     url = f"postgresql+asyncpg://{pg_container.username}:{pg_container.password}@{host}:{port}/{db_name}"
-    # alembic's env.py reads DATABASE_URL from the environment, so both must point at the isolated DB
-    monkeypatch.setenv("DATABASE_URL", url)
     monkeypatch.setattr(settings, "database_url", url)
     monkeypatch.setattr(settings, "cloud_sql_instance", None)
 
@@ -32,36 +29,34 @@ def isolated_db(pg_container, pg_sync_engine, monkeypatch):
         conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
 
 
+def _status() -> migrate.MigrationStatus:
+    with migrate.sync_engine() as engine, engine.connect() as conn:
+        return migrate.get_migration_status(conn)
+
+
 def test_check_fails_on_unmigrated_database(isolated_db):
     with pytest.raises(migrate.SchemaNotUpToDateError, match="python -m yaai.server.migrate"):
         migrate.check_schema_up_to_date()
 
 
 def test_check_passes_after_migrations(isolated_db):
-    migrate.run_migrations()
+    migrate.main([])
 
     migrate.check_schema_up_to_date()
-
-    engine = create_engine(settings.database_url_sync)
-    try:
-        with engine.connect() as conn:
-            status = migrate.get_migration_status(conn)
-    finally:
-        engine.dispose()
-    assert status.is_up_to_date
+    assert _status().is_up_to_date
 
 
 def test_check_fails_when_database_is_behind(isolated_db):
-    command.upgrade(migrate._alembic_config(), "7f3c318ce50f")
+    migrate.main(["upgrade", "7f3c318ce50f"])
 
     with pytest.raises(migrate.SchemaNotUpToDateError, match="7f3c318ce50f"):
         migrate.check_schema_up_to_date()
 
 
-def test_run_migrations_upgrades_database_that_is_behind(isolated_db):
-    command.upgrade(migrate._alembic_config(), "7f3c318ce50f")
+def test_main_upgrades_database_that_is_behind(isolated_db):
+    migrate.main(["upgrade", "7f3c318ce50f"])
 
-    migrate.run_migrations()
+    migrate.main([])
 
     migrate.check_schema_up_to_date()
 
@@ -76,7 +71,7 @@ def _stamp_unknown_revision() -> None:
 
 
 def test_check_warns_and_continues_when_database_is_ahead(isolated_db):
-    migrate.run_migrations()
+    migrate.main([])
     _stamp_unknown_revision()
     records: list[logging.LogRecord] = []
     handler = logging.Handler(level=logging.WARNING)
@@ -91,9 +86,32 @@ def test_check_warns_and_continues_when_database_is_ahead(isolated_db):
     assert any("future_revision" in m and "newer than this application" in m for m in messages)
 
 
-def test_run_migrations_refuses_database_that_is_ahead(isolated_db):
-    migrate.run_migrations()
+def test_main_fails_when_database_is_ahead(isolated_db):
+    migrate.main([])
     _stamp_unknown_revision()
 
-    with pytest.raises(migrate.SchemaAheadError, match="future_revision"):
-        migrate.run_migrations()
+    with pytest.raises(SystemExit) as exc_info:
+        migrate.main([])
+
+    assert exc_info.value.code != 0
+
+
+def test_main_downgrades_one_revision(isolated_db):
+    migrate.main([])
+    head = _status().head
+
+    migrate.main(["downgrade", "-1"])
+
+    status = _status()
+    assert status.current is not None
+    assert status.current != head
+
+
+def test_all_migrations_downgrade_to_base_and_upgrade_again(isolated_db):
+    migrate.main([])
+
+    migrate.main(["downgrade", "base"])
+    assert _status().current is None
+
+    migrate.main([])
+    assert _status().is_up_to_date

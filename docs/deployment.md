@@ -205,6 +205,22 @@ uvicorn yaai.server.main:app --host 0.0.0.0 --port 8000
 
 The server checks on startup that the schema is up to date, creates the admin account, and serves both the API and the frontend.
 
+### Database migrations
+
+`python -m yaai.server.migrate` is only a pass-through to the [Alembic CLI](https://alembic.sqlalchemy.org/en/latest/api/commands.html). It adds the `alembic.ini` shipped with the package and connects to the database configured for YAAI (`DATABASE_URL`, or the Cloud SQL connector when `CLOUD_SQL_INSTANCE` is set). Without arguments it runs `upgrade head`; all arguments are passed to Alembic unchanged:
+
+```bash
+python -m yaai.server.migrate                    # upgrade to the latest revision
+python -m yaai.server.migrate current            # show the database revision
+python -m yaai.server.migrate history            # list all revisions
+python -m yaai.server.migrate downgrade -1       # revert the latest migration
+python -m yaai.server.migrate downgrade <rev>    # revert to a specific revision
+python -m yaai.server.migrate upgrade head --sql # print the SQL instead of running it
+python -m yaai.server.migrate --help
+```
+
+A downgrade must run with the **newer** application version: only it contains the migration scripts (and their `downgrade()` steps) for its own revisions. To roll back a release, first downgrade the database with the new image to the head revision of the old release (`python -m yaai.server.migrate history` shows it), then deploy the old image.
+
 ## Google Cloud SQL
 
 If your PostgreSQL runs on Google Cloud SQL, YAAI can connect using the **Cloud SQL Python Connector** with IAM authentication -- no IP allow-lists, SSL certificates, or Auth Proxy needed.
@@ -280,7 +296,14 @@ The last step is only needed if you run a [scheduled jobs worker](#scheduled-job
 
 #### Rollbacks and backward-compatible migrations
 
-On startup the server fails fast if the database is empty or **behind** the application. If the database is **ahead** (it was already migrated by a newer version, e.g. while the old revision still serves traffic or after a traffic rollback), the server only logs a warning and keeps starting. This means migrations must be backward compatible with the previous application version (expand/contract): add columns/tables first, and remove or rename them only in a later release once no older version uses them. `python -m yaai.server.migrate` refuses to run with an older image against a newer database and exits with a clear error.
+On startup the server fails fast if the database is empty or **behind** the application. If the database is **ahead** (it was already migrated by a newer version, e.g. while the old revision still serves traffic or after a traffic rollback), the server only logs a warning and keeps starting. This means migrations must be backward compatible with the previous application version (expand/contract): add columns/tables first, and remove or rename them only in a later release once no older version uses them. `python -m yaai.server.migrate` run with an older image against a newer database fails because Alembic cannot locate the database revision.
+
+If you need to revert the schema instead (e.g. a migration broke something), execute the job with the **new** image and override its arguments, then roll back the service:
+
+```bash
+gcloud run jobs execute yaai-migrate --region us-central1 --wait \
+  --args=-m,yaai.server.migrate,downgrade,<old-head-revision>
+```
 
 A Cloud Run Job is preferred over a Cloud Function: it reuses the already built application image (including Alembic and the migration files), so there is no separate packaging or dependency set to maintain, and it can run longer than function timeouts allow.
 

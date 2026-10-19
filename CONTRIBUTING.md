@@ -52,6 +52,15 @@ cd frontend && npm run type-check
 
 YAAI uses [Alembic](https://alembic.sqlalchemy.org/) for schema migrations. Migrations are **not** applied on startup: the server refuses to start if the schema is behind. Apply them with `uv run python -m yaai.server.migrate` (Docker Compose does this automatically via the `migrate` service).
 
+`python -m yaai.server.migrate` is only a pass-through to the Alembic CLI: it adds the packaged `alembic.ini` and connects to the database configured for YAAI (`DATABASE_URL` from the environment or `.env`, or the Cloud SQL connector). Without arguments it runs `upgrade head`; any arguments are passed to Alembic unchanged:
+
+```bash
+uv run python -m yaai.server.migrate current             # show the database revision
+uv run python -m yaai.server.migrate history             # list all revisions
+uv run python -m yaai.server.migrate downgrade -1        # revert the latest migration
+uv run python -m yaai.server.migrate upgrade head --sql  # print the SQL instead of running it
+```
+
 If you change a SQLAlchemy model (add/remove/rename a column, create a new table, etc.), you need to generate a migration:
 
 ```bash
@@ -59,11 +68,10 @@ If you change a SQLAlchemy model (add/remove/rename a column, create a new table
 docker compose up db -d
 
 # Generate the migration
-DATABASE_URL="postgresql+asyncpg://aimon:changeme@localhost:5431/aimonitoring" \
-  uv run alembic -c yaai/server/alembic.ini revision --autogenerate -m "short description of change"
+uv run python -m yaai.server.migrate revision --autogenerate -m "short description of change"
 ```
 
-This creates a new file in `yaai/server/alembic/versions/`. Review it -- autogenerate is good but not perfect. Check that it captures your changes correctly and doesn't include unintended operations.
+This creates a new file in `yaai/server/alembic/versions/`. Review it -- autogenerate is good but not perfect. Check that it captures your changes correctly and doesn't include unintended operations. Implement `downgrade()` as well, including dropping enum types created in `upgrade()`: `tests/integration/migrations_test.py` downgrades all migrations to base and upgrades them again.
 
 Apply it locally with `uv run python -m yaai.server.migrate`, then commit the migration file along with your model changes.
 

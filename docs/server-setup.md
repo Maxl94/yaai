@@ -87,6 +87,8 @@ The server does **not** migrate the database on startup. Apply the migrations fi
 uv run python -m yaai.server.migrate
 ```
 
+`yaai.server.migrate` is a pass-through to the [Alembic CLI](https://alembic.sqlalchemy.org/en/latest/api/commands.html) bound to the configured database: without arguments it runs `upgrade head`, otherwise it passes the arguments to Alembic (e.g. `current`, `history`, `downgrade -1`).
+
 Then start the server:
 
 ```bash

@@ -26,7 +26,6 @@ _mock_connector_module.Connector = MagicMock()
 sys.modules.setdefault("google.cloud.sql.connector", _mock_connector_module)
 
 from yaai.server.cloud_sql import CloudSQLConnector  # noqa: E402
-from yaai.server.migrate import MigrationStatus  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -220,103 +219,54 @@ class TestInitEngine:
             assert database.engine is mock_engine_2
 
 
-class TestRunMigrations:
-    """Test migrate.run_migrations for both connection paths."""
+class TestMigrateSyncEngine:
+    def test_sync_engine_with_cloud_sql_closes_connector(self):
+        import yaai.server.migrate as migrate_mod
 
-    @staticmethod
-    def _engine_with_connection():
-        mock_connection = MagicMock()
         mock_engine = MagicMock()
-        mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_connection)
-        mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
-        return mock_engine, mock_connection
-
-    def test_run_migrations_without_cloud_sql(self):
-        import yaai.server.migrate as migrate_mod
-
-        mock_engine, mock_connection = self._engine_with_connection()
-        with (
-            patch.object(migrate_mod, "AlembicConfig") as mock_cfg_cls,
-            patch.object(migrate_mod, "command") as mock_command,
-            patch.object(migrate_mod, "settings") as mock_s,
-            patch.object(migrate_mod, "create_engine", return_value=mock_engine) as mock_create_engine,
-            patch.object(migrate_mod, "get_migration_status", return_value=MigrationStatus("a", "b", True)),
-        ):
-            mock_s.cloud_sql_instance = None
-            mock_s.database_url_sync = "sqlite:///test.db"
-            mock_cfg = MagicMock()
-            mock_cfg.attributes = {}
-            mock_cfg_cls.return_value = mock_cfg
-
-            migrate_mod.run_migrations()
-
-            mock_create_engine.assert_called_once_with("sqlite:///test.db")
-            assert mock_cfg.attributes["connection"] is mock_connection
-            mock_command.upgrade.assert_called_once_with(mock_cfg, "head")
-            mock_engine.dispose.assert_called_once()
-
-    def test_run_migrations_with_cloud_sql_closes_connector(self):
-        import yaai.server.migrate as migrate_mod
-
-        mock_engine, mock_connection = self._engine_with_connection()
         mock_sync_connector = MagicMock()
         _mock_connector_module.Connector.return_value = mock_sync_connector
 
         with (
-            patch.object(migrate_mod, "AlembicConfig") as mock_cfg_cls,
-            patch.object(migrate_mod, "command") as mock_command,
             patch.object(migrate_mod, "settings") as mock_s,
             patch("yaai.server.cloud_sql.settings") as mock_cloud_settings,
             patch("yaai.server.cloud_sql.create_engine", return_value=mock_engine),
-            patch.object(migrate_mod, "get_migration_status", return_value=MigrationStatus(None, "b", True)),
         ):
             mock_s.cloud_sql_instance = "my-project:us-central1:my-instance"
             mock_cloud_settings.cloud_sql_ip_type = "public"
-            mock_cfg = MagicMock()
-            mock_cfg.attributes = {}
-            mock_cfg_cls.return_value = mock_cfg
 
-            migrate_mod.run_migrations()
+            with migrate_mod.sync_engine() as engine:
+                assert engine is mock_engine
 
-            assert mock_cfg.attributes["connection"] is mock_connection
-            mock_command.upgrade.assert_called_once_with(mock_cfg, "head")
-            mock_engine.dispose.assert_called_once()
-            mock_sync_connector.close.assert_called_once()
+        mock_engine.dispose.assert_called_once()
+        mock_sync_connector.close.assert_called_once()
 
-    def test_run_migrations_refuses_database_ahead_of_code(self):
+
+class TestMigrateMain:
+    """migrate.main passes its arguments to the Alembic CLI with the packaged alembic.ini."""
+
+    def test_defaults_to_upgrade_head(self):
         import yaai.server.migrate as migrate_mod
 
-        mock_engine, _ = self._engine_with_connection()
-        with (
-            patch.object(migrate_mod, "AlembicConfig"),
-            patch.object(migrate_mod, "command") as mock_command,
-            patch.object(migrate_mod, "settings") as mock_s,
-            patch.object(migrate_mod, "create_engine", return_value=mock_engine),
-            patch.object(migrate_mod, "get_migration_status", return_value=MigrationStatus("future", "b", False)),
-        ):
-            mock_s.cloud_sql_instance = None
-            with pytest.raises(migrate_mod.SchemaAheadError, match="future"):
-                migrate_mod.run_migrations()
+        with patch.object(migrate_mod.alembic.config, "main") as mock_main:
+            migrate_mod.main([])
 
-        mock_command.upgrade.assert_not_called()
+        argv = mock_main.call_args.args[0]
+        assert argv[:2] == ["-c", str(migrate_mod._ALEMBIC_INI)]
+        assert argv[2:] == ["upgrade", "head"]
 
-    def test_main_exits_nonzero_on_failure(self):
+    def test_passes_arguments_through(self):
         import yaai.server.migrate as migrate_mod
 
-        with patch.object(migrate_mod, "run_migrations", side_effect=RuntimeError("boom")):
-            with pytest.raises(SystemExit) as exc_info:
-                migrate_mod.main()
+        with patch.object(migrate_mod.alembic.config, "main") as mock_main:
+            migrate_mod.main(["downgrade", "-1"])
 
-        assert exc_info.value.code == 1
+        assert mock_main.call_args.args[0][2:] == ["downgrade", "-1"]
 
-    def test_main_exits_nonzero_without_traceback_when_database_is_ahead(self, caplog):
+    def test_exits_nonzero_on_alembic_error(self):
         import yaai.server.migrate as migrate_mod
 
-        error = migrate_mod.SchemaAheadError("database schema revision future is newer")
-        with patch.object(migrate_mod, "run_migrations", side_effect=error), caplog.at_level("ERROR"):
-            with pytest.raises(SystemExit) as exc_info:
-                migrate_mod.main()
+        with pytest.raises(SystemExit) as exc_info:
+            migrate_mod.main(["show", "does_not_exist"])
 
-        assert exc_info.value.code == 1
-        assert "newer" in caplog.text
-        assert "Traceback" not in caplog.text
+        assert exc_info.value.code != 0
