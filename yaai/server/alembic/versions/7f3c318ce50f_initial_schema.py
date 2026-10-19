@@ -235,3 +235,13 @@ def downgrade() -> None:
     op.drop_table("service_accounts")
     op.drop_table("models")
     # ### end Alembic commands ###
+    for enum_name in (
+        "userrole",
+        "authprovider",
+        "comparisontype",
+        "fielddirection",
+        "datatype",
+        "jobstatus",
+        "notificationseverity",
+    ):
+        sa.Enum(name=enum_name).drop(op.get_bind(), checkfirst=True)
