@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/Maxl94/yaai/compare/v1.0.0...v1.1.0) (2026-10-19)
+
+
+### Features
+
+* **migrate:** pass arguments through to the Alembic CLI ([022980d](https://github.com/Maxl94/yaai/commit/022980dec51182576e88ed26fadd89f791bf0fc0))
+
+
+### Bug Fixes
+
+* **migrations:** drop enum types when downgrading the initial schema ([5ba57a5](https://github.com/Maxl94/yaai/commit/5ba57a5af411e9401cedde411d65971b57e05943))
+
 ## [1.0.0](https://github.com/Maxl94/yaai/compare/v0.7.0...v1.0.0) (2026-10-17)
 
 
